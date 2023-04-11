@@ -1,11 +1,12 @@
 import numpy as np
 import cv2
 import argparse
+from sklearn.mixture import GaussianMixture
 
-GC_BGD = 0 # Hard bg pixel
-GC_FGD = 1 # Hard fg pixel, will not be used
-GC_PR_BGD = 2 # Soft bg pixel
-GC_PR_FGD = 3 # Soft fg pixel
+GC_BGD = 0  # Hard bg pixel
+GC_FGD = 1  # Hard fg pixel, will not be used
+GC_PR_BGD = 2  # Soft bg pixel
+GC_PR_FGD = 3  # Soft fg pixel
 
 
 # Define the GrabCut algorithm function
@@ -15,15 +16,15 @@ def grabcut(img, rect, n_iter=5):
     mask.fill(GC_BGD)
     x, y, w, h = rect
 
-    #Initalize the inner square to Foreground
-    mask[y:y+h, x:x+w] = GC_PR_FGD
-    mask[rect[1]+rect[3]//2, rect[0]+rect[2]//2] = GC_FGD
+    # Initalize the inner square to Foreground
+    mask[y:y + h, x:x + w] = GC_PR_FGD
+    mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
 
     bgGMM, fgGMM = initalize_GMMs(img, mask)
 
     num_iters = 1000
     for i in range(num_iters):
-        #Update GMM
+        # Update GMM
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
 
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
@@ -38,10 +39,18 @@ def grabcut(img, rect, n_iter=5):
 
 
 def initalize_GMMs(img, mask):
-    # TODO: implement initalize_GMMs
-    bgGMM = None
-    fgGMM = None
-
+    n_components = 5
+    bg_pixels = img[mask == 0]  # 0 is background
+    fg_pixels = img[np.logical_or(mask == 1, mask == 3)]  # 1 and 3 are foreground
+    # fit GMM to the background pixels , covariance_type='diag' means that the covariance matrix is diagonal
+    bgGMM = GaussianMixture(n_components=n_components, covariance_type='diag').fit(bg_pixels)
+    fgGMM = GaussianMixture(n_components=n_components, covariance_type='diag').fit(fg_pixels)
+    bg_weights = bgGMM.predict_proba(bg_pixels)
+    bg_weights = np.mean(bg_weights, axis=0)
+    fg_weights = fgGMM.predict_proba(fg_pixels)
+    fg_weights = np.mean(fg_weights, axis=0)
+    bgGMM.weights_ = bg_weights
+    fgGMM.weights_ = fg_weights
     return bgGMM, fgGMM
 
 
@@ -74,6 +83,7 @@ def cal_metric(predicted_mask, gt_mask):
 
     return 100, 100
 
+
 def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_name', type=str, default='banana1', help='name of image from the course files')
@@ -83,10 +93,10 @@ def parse():
     parser.add_argument('--rect', type=str, default='1,1,100,100', help='if you wish change the rect (x,y,w,h')
     return parser.parse_args()
 
+
 if __name__ == '__main__':
     # Load an example image and define a bounding box around the object of interest
     args = parse()
-
 
     if args.input_img_path == '':
         input_path = f'data/imgs/{args.input_name}.jpg'
@@ -96,8 +106,7 @@ if __name__ == '__main__':
     if args.use_file_rect:
         rect = tuple(map(int, open(f"data/bboxes/{args.input_name}.txt", "r").read().split(' ')))
     else:
-        rect = tuple(map(int,args.rect.split(',')))
-
+        rect = tuple(map(int, args.rect.split(',')))
 
     img = cv2.imread(input_path)
 
