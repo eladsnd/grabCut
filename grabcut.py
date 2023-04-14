@@ -17,6 +17,9 @@ def grabcut(img, rect, n_iter=5):
     mask.fill(GC_BGD)
     x, y, w, h = rect
 
+    w -= x
+    h -= y
+
     # Initalize the inner square to Foreground
     mask[y:y + h, x:x + w] = GC_PR_FGD
     mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
@@ -52,6 +55,8 @@ def initalize_GMMs(img, mask):
     fg_weights = np.mean(fg_weights, axis=0)
     bgGMM.weights_ = bg_weights
     fgGMM.weights_ = fg_weights
+    print(bgGMM.weights_)
+    print(fgGMM.weights_)
     return bgGMM, fgGMM
 
 
