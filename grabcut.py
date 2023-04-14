@@ -62,6 +62,18 @@ def initalize_GMMs(img, mask):
 # Define helper functions for the GrabCut algorithm
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # TODO: implement GMM component assignment step
+    bg_pixels = img[mask == 0]  # 0 is background
+    fg_pixels = img[np.logical_or(mask == 1, mask == 3)]  # 1 and 3 are foreground
+    # fit GMM to the background pixels , covariance_type='diag' means that the covariance matrix is diagonal
+    bgGMM = GaussianMixture(n_components=5, covariance_type='diag').fit(bg_pixels)
+    fgGMM = GaussianMixture(n_components=5, covariance_type='diag').fit(fg_pixels)
+    bg_weights = bgGMM.predict_proba(bg_pixels)
+    bg_weights = np.mean(bg_weights, axis=0)
+    fg_weights = fgGMM.predict_proba(fg_pixels)
+    fg_weights = np.mean(fg_weights, axis=0)
+    bgGMM.weights_ = bg_weights
+    fgGMM.weights_ = fg_weights
+
     return bgGMM, fgGMM
 
 
