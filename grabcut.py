@@ -16,7 +16,6 @@ def grabcut(img, rect, n_iter=5):
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
     x, y, w, h = rect
-
     w -= x
     h -= y
 
