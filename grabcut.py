@@ -3,6 +3,7 @@ import cv2
 import argparse
 from sklearn.mixture import GaussianMixture
 
+
 GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
 GC_PR_BGD = 2  # Soft bg pixel
