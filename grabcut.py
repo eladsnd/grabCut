@@ -1,8 +1,8 @@
 import numpy as np
 import cv2
 import argparse
-from sklearn.mixture import GaussianMixture
 
+n_components = 5
 
 GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
@@ -42,38 +42,28 @@ def grabcut(img, rect, n_iter=5):
 
 
 def initalize_GMMs(img, mask):
-    n_components = 5
-    bg_pixels = img[mask == 0]  # 0 is background
-    fg_pixels = img[np.logical_or(mask == 1, mask == 3)]  # 1 and 3 are foreground
-    # fit GMM to the background pixels , covariance_type='diag' means that the covariance matrix is diagonal
-    bgGMM = GaussianMixture(n_components=n_components, covariance_type='diag').fit(bg_pixels)
-    fgGMM = GaussianMixture(n_components=n_components, covariance_type='diag').fit(fg_pixels)
-    bg_weights = bgGMM.predict_proba(bg_pixels)
-    bg_weights = np.mean(bg_weights, axis=0)
-    fg_weights = fgGMM.predict_proba(fg_pixels)
-    fg_weights = np.mean(fg_weights, axis=0)
-    bgGMM.weights_ = bg_weights
-    fgGMM.weights_ = fg_weights
-    print(bgGMM.weights_)
-    print(fgGMM.weights_)
+    # Initialize foreground and background GMMs
+    fg_pixels = img[mask > 0]
+    bg_pixels = img[mask == 0]
+
+    fgGMM = {
+        'weights': np.ones(n_components) / n_components,
+        'means': np.random.choice(fg_pixels.flatten(), size=(n_components, img.shape[-1])),
+        'covs': np.array([np.cov(fg_pixels.T) for _ in range(n_components)])
+    }
+
+    bgGMM = {
+        'weights': np.ones(n_components) / n_components,
+        'means': np.random.choice(bg_pixels.flatten(), size=(n_components, img.shape[-1])),
+        'covs': np.array([np.cov(bg_pixels.T) for _ in range(n_components)])
+    }
+
     return bgGMM, fgGMM
 
 
 # Define helper functions for the GrabCut algorithm
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # TODO: implement GMM component assignment step
-    bg_pixels = img[mask == 0]  # 0 is background
-    fg_pixels = img[np.logical_or(mask == 1, mask == 3)]  # 1 and 3 are foreground
-    # fit GMM to the background pixels , covariance_type='diag' means that the covariance matrix is diagonal
-    bgGMM = GaussianMixture(n_components=5, covariance_type='diag').fit(bg_pixels)
-    fgGMM = GaussianMixture(n_components=5, covariance_type='diag').fit(fg_pixels)
-    bg_weights = bgGMM.predict_proba(bg_pixels)
-    bg_weights = np.mean(bg_weights, axis=0)
-    fg_weights = fgGMM.predict_proba(fg_pixels)
-    fg_weights = np.mean(fg_weights, axis=0)
-    bgGMM.weights_ = bg_weights
-    fgGMM.weights_ = fg_weights
-
     return bgGMM, fgGMM
 
 
