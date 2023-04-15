@@ -2,6 +2,8 @@ import numpy as np
 import cv2
 import argparse
 
+from sklearn.cluster import KMeans
+
 n_components = 5
 
 GC_BGD = 0  # Hard bg pixel
@@ -42,23 +44,44 @@ def grabcut(img, rect, n_iter=5):
 
 
 def initalize_GMMs(img, mask):
-    # Initialize foreground and background GMMs
-    fg_pixels = img[mask > 0]
-    bg_pixels = img[mask == 0]
+    # Get the pixels of the foreground and the background from the mask
+    fg_pixels = img[mask > 0].reshape(-1, 3)
+    bg_pixels = img[mask == 0].reshape(-1, 3)
 
+    # Use KMeans to cluster the pixels into n_components clusters for each of foreground and background
+    fg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(fg_pixels)
+    bg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(bg_pixels)
+
+    # Create an empty GMM for the foreground and background
     fgGMM = {
-        'weights': np.ones(n_components) / n_components,
-        'means': np.random.choice(fg_pixels.flatten(), size=(n_components, img.shape[-1])),
-        'covs': np.array([np.cov(fg_pixels.T) for _ in range(n_components)])
+        'weights': np.zeros(n_components),
+        'means': np.zeros((n_components, 3)),
+        'covs': np.zeros((n_components, 3, 3)),
+        'dets': np.zeros(n_components)
     }
 
     bgGMM = {
-        'weights': np.ones(n_components) / n_components,
-        'means': np.random.choice(bg_pixels.flatten(), size=(n_components, img.shape[-1])),
-        'covs': np.array([np.cov(bg_pixels.T) for _ in range(n_components)])
-    }
+        'weights': np.zeros(n_components),
+        'means': np.zeros((n_components, 3)),
+        'covs': np.zeros((n_components, 3, 3)),
+        'dets': np.zeros(n_components)}
 
-    return bgGMM, fgGMM
+    # Fill the GMM with the KMeans results
+    fgGMM['weights'] = np.full(n_components, 1 / n_components)
+    fgGMM['means'] = fg_kmeans.cluster_centers_
+    fgGMM['covs'] = np.array([np.cov(fg_pixels[fg_kmeans.labels_ == i].T) for i in range(n_components)])
+    fgGMM['dets'] = np.array([np.linalg.det(fgGMM['covs'][i]) for i in range(n_components)])
+    for i in range(n_components):
+        fgGMM['covs'][i] = np.linalg.inv(fgGMM['covs'][i])
+
+    bgGMM['weights'] = np.full(n_components, 1 / n_components)
+    bgGMM['means'] = bg_kmeans.cluster_centers_
+    bgGMM['covs'] = np.array([np.cov(bg_pixels[bg_kmeans.labels_ == i].T) for i in range(n_components)])
+    bgGMM['dets'] = np.array([np.linalg.det(bgGMM['covs'][i]) for i in range(n_components)])
+    for i in range(n_components):
+        bgGMM['covs'][i] = np.linalg.inv(bgGMM['covs'][i])
+
+    return fgGMM, bgGMM
 
 
 # Define helper functions for the GrabCut algorithm
