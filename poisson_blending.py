@@ -11,8 +11,6 @@ def poisson_blend(im_src, im_tgt, im_mask, center):
     im_blend = im_tgt
     return im_blend
 
-# yotkesTAU
-
 def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--src_path', type=str, default='./data/imgs/banana2.jpg', help='image file path')
