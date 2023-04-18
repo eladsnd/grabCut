@@ -144,7 +144,8 @@ def calc_Beta(img):
             num_neighbors = neighbors.size - 1  # Exclude the central pixel
             if num_neighbors > 0:
                 mean_squared_distance = np.sum((neighbors - img[i, j]) ** 2) / num_neighbors
-                beta[i, j] = 1 / (2 * mean_squared_distance)
+                if mean_squared_distance > 0:
+                    beta[i, j] = 1 / (2 * mean_squared_distance)
     return beta
 
 
