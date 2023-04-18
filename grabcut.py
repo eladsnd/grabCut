@@ -44,7 +44,7 @@ def grabcut(img, rect, n_iter=5):
 
 
 def initalize_GMMs(img, mask):
-    beta = calc_beta(img)
+    Beta = calc_Beta(img)
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
     bg_pixels = img[mask == 0].reshape(-1, 3)
@@ -135,18 +135,16 @@ def cal_metric(predicted_mask, gt_mask):
     return 100, 100
 
 
-def calc_beta(img):
-    # beta[i,j] = 1/2*(expected value of the squared pixels of the image around pixel (i,j) if they exist)
+
+def calc_Beta(img):
     beta = np.zeros(img.shape[:2])
-    inside = np.ones(9).reshape(3, 3)
-    for i in range(1, img.shape[0] - 1):
-        for j in range(1, img.shape[1] - 1):
-            z_m = img[i - 1:i + 2, j - 1:j + 2] * inside
-            for k in range(3):
-                for l in range(3):
-                    beta[i, j] += distance_between_pixels((z_m[k, l]), (z_m[1, 1])) ** 2
-            if beta[i, j] != 0:
-                beta[i, j] = 1 / (beta[i, j] * 2 / 8)
+    for i in range(img.shape[0]):
+        for j in range(img.shape[1]):
+            neighbors = img[max(0, i - 1):min(i + 2, img.shape[0]), max(0, j - 1):min(j + 2, img.shape[1])]
+            num_neighbors = neighbors.size - 1  # Exclude the central pixel
+            if num_neighbors > 0:
+                mean_squared_distance = np.sum((neighbors - img[i, j]) ** 2) / num_neighbors
+                beta[i, j] = 1 / (2 * mean_squared_distance)
     return beta
 
 
