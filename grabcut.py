@@ -135,7 +135,6 @@ def cal_metric(predicted_mask, gt_mask):
     return 100, 100
 
 
-
 def calc_beta(img):
     """
     Calculates the beta parameter for a given image.
@@ -150,50 +149,16 @@ def calc_beta(img):
     # Calculate the differences between adjacent pixels in the image
     dx = np.diff(img, axis=1)
     dy = np.diff(img, axis=0)
+    diag1 = list((img[i+1, j+1] - img[i, j] for i in range(img.shape[0]-1) for j in range(img.shape[1]-1)))
+    diag1 = np.array(diag1)
 
     # Calculate the sum of squared differences
-    sum_m = np.sum(dx**2) + np.sum(dy**2)
+    sum_m = np.sum(dx ** 2) + np.sum(dy ** 2) + np.sum(diag1 ** 2)
 
     # Calculate the beta parameter
-    beta = 1 / (2 * sum_m / ((img.shape[0]-1)*(img.shape[1]-1)*3))
+    beta = 1 / (2 * sum_m / ((img.shape[0] - 1) * (img.shape[1] - 1) * 3))
 
     return beta
-
-
-# def calc_beta_imp_1(img):  # assume differant beta for each pixel
-#     beta = np.zeros(img.shape[:2])
-#     for i in range(img.shape[0]):
-#         for j in range(img.shape[1]):
-#             neighbors = img[max(0, i - 1):min(i + 2, img.shape[0]), max(0, j - 1):min(j + 2, img.shape[1])]
-#             num_neighbors = neighbors.size - 1  # Exclude the central pixel
-#             if num_neighbors > 0:
-#                 mean_squared_distance = np.sum((neighbors - img[i, j]) ** 2) / num_neighbors
-#                 if mean_squared_distance > 0:
-#                     beta[i, j] = 1 / (2 * mean_squared_distance)
-#     return np.mean(beta)
-# def calc_Beta_imp_2(img):
-#     """
-#     Calculates the beta parameter for a given image.
-#
-#     Args:
-#     img (numpy.ndarray): A 2D numpy array representing the image.
-#
-#     Returns:
-#     float: The calculated beta value.
-#     """
-#
-#     # Calculate the gradient of the image using the Sobel operator
-#     dx = np.abs(np.gradient(img)[0])
-#     dy = np.abs(np.gradient(img)[1])
-#     gradient = np.sqrt(dx ** 2 + dy ** 2)
-#
-#     # Calculate the average gradient of the image
-#     avg_gradient = np.mean(gradient)
-#
-#     # Calculate the beta parameter
-#     beta = 1 / (2 * avg_gradient ** 2)
-#
-#     return beta
 
 
 def parse():
