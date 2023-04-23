@@ -1,8 +1,7 @@
 import numpy as np
 import cv2
 import argparse
-
-
+import igraph as ig
 from sklearn.cluster import KMeans
 
 n_components = 5
@@ -44,9 +43,52 @@ def grabcut(img, rect, n_iter=5):
     return mask, bgGMM, fgGMM
 
 
+def add_n_links(g, pixels, beta):
+    for i in range(pixels.shape[0]):
+        for j in range(pixels.shape[1]):
+            vertex_id = i * pixels.shape[1] + j
+            # add n-links to graph for each neighboring pixel down and right diagonally down and right diagonally
+            # down and left
+            if i + 1 < pixels.shape[0]:  # [i+1, j]
+                weight = n_link_calc()
+                g.add_edge(vertex_id,
+                           vertex_id + pixels.shape[1],
+                           weight=weight)
+            if j + 1 < pixels.shape[1]:  # [i, j+1]
+                g.add_edge(vertex_id,
+                           vertex_id + 1,
+                           weight=n_link_calc(pixels[i, j], pixels[i, j + 1], beta))
+            if i + 1 < pixels.shape[0] and j + 1 < pixels.shape[1]:  # [i+1, j+1]
+                g.add_edge(vertex_id,
+                           vertex_id + pixels.shape[1] + 1,
+                           weight=n_link_calc(pixels[i, j], pixels[i + 1, j + 1], beta))
+            if i + 1 < pixels.shape[0] and j - 1 >= 0:  # [i+1, j-1]
+                g.add_edge(vertex_id,
+                           vertex_id + pixels.shape[1] - 1,
+                           weight=n_link_calc(pixels[i, j], pixels[i + 1, j - 1], beta))
+    return g
+
+
+def initalize_graph(pixels, beta):
+    g = ig.Graph()
+    add_nods(g, pixels)
+    add_n_links(g, pixels, beta)
+
+
+def add_nods(g, pixels):
+    # add nods to graph
+    for i in range(pixels.shape[0]):
+        for j in range(pixels.shape[1]):
+            vertex_id = i * pixels.shape[1] + j
+            g.add_vertex(vertex_id)
+    # add source and sink
+    g.add_vertex('s')
+    g.add_vertex('t')
+
+
 def initalize_GMMs(img, mask):
     beta = calc_beta(img)
-
+    initalize_graph(img, beta)
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
     bg_pixels = img[mask == 0].reshape(-1, 3)
@@ -151,8 +193,8 @@ def calc_beta(img):
     # Calculate the differences between adjacent pixels in the image
     dx = np.diff(img, axis=1)
     dy = np.diff(img, axis=0)
-    diag1 = list((img[i+1, j+1] - img[i, j] for i in range(img.shape[0]-1) for j in range(img.shape[1]-1)))
-    diag2 = list((img[i+1, j-1] - img[i, j] for i in range(img.shape[0]-1) for j in range(1, img.shape[1])))
+    diag1 = list((img[i + 1, j + 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(img.shape[1] - 1)))
+    diag2 = list((img[i + 1, j - 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(1, img.shape[1])))
     diag1 = np.array(diag1)
     diag2 = np.array(diag2)
 
@@ -162,6 +204,14 @@ def calc_beta(img):
     # Calculate the beta parameter
     beta = 1 / (2 * (sum_m / count))
     return beta
+
+
+def n_link_calc(img, i1, j1, i2, j2, beta):
+    """
+    n(x,y) = 50/dist(I(x),I(y)) * exp(-beta * ||I(x)-I(y)||^2)
+    """
+    dist = distance_between_pixels(img[i1, j1] - img[i2, j2])
+    return 50 / dist * np.exp(-beta * dist ** 2)
 
 
 def distance_between_pixels(pixel1, pixel2):
