@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import argparse
 
+
 from sklearn.cluster import KMeans
 
 n_components = 5
@@ -45,6 +46,7 @@ def grabcut(img, rect, n_iter=5):
 
 def initalize_GMMs(img, mask):
     beta = calc_beta(img)
+
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
     bg_pixels = img[mask == 0].reshape(-1, 3)
@@ -150,15 +152,20 @@ def calc_beta(img):
     dx = np.diff(img, axis=1)
     dy = np.diff(img, axis=0)
     diag1 = list((img[i+1, j+1] - img[i, j] for i in range(img.shape[0]-1) for j in range(img.shape[1]-1)))
+    diag2 = list((img[i+1, j-1] - img[i, j] for i in range(img.shape[0]-1) for j in range(1, img.shape[1])))
     diag1 = np.array(diag1)
+    diag2 = np.array(diag2)
 
     # Calculate the sum of squared differences
-    sum_m = np.sum(dx ** 2) + np.sum(dy ** 2) + np.sum(diag1 ** 2)
-
+    sum_m = np.sum(dx ** 2) + np.sum(dy ** 2) + np.sum(diag1 ** 2) + np.sum(diag2 ** 2)
+    count = dx.shape[0] + dy.shape[0] + diag1.shape[0] + diag2.shape[0]
     # Calculate the beta parameter
-    beta = 1 / (2 * sum_m / ((img.shape[0] - 1) * (img.shape[1] - 1) * 3))
-
+    beta = 1 / (2 * (sum_m / count))
     return beta
+
+
+def distance_between_pixels(pixel1, pixel2):
+    return np.linalg.norm(pixel1 - pixel2)
 
 
 def parse():
