@@ -43,49 +43,6 @@ def grabcut(img, rect, n_iter=5):
     return mask, bgGMM, fgGMM
 
 
-def add_n_links(g, pixels, beta):
-    for i in range(pixels.shape[0]):
-        for j in range(pixels.shape[1]):
-            vertex_id = i * pixels.shape[1] + j
-            # add n-links to graph for each neighboring pixel down and right diagonally down and right diagonally
-            # down and left
-            if i + 1 < pixels.shape[0]:  # [i+1, j]
-                weight = n_link_calc()
-                g.add_edge(vertex_id,
-                           vertex_id + pixels.shape[1],
-                           weight=weight)
-            if j + 1 < pixels.shape[1]:  # [i, j+1]
-                g.add_edge(vertex_id,
-                           vertex_id + 1,
-                           weight=n_link_calc(pixels[i, j], pixels[i, j + 1], beta))
-            if i + 1 < pixels.shape[0] and j + 1 < pixels.shape[1]:  # [i+1, j+1]
-                g.add_edge(vertex_id,
-                           vertex_id + pixels.shape[1] + 1,
-                           weight=n_link_calc(pixels[i, j], pixels[i + 1, j + 1], beta))
-            if i + 1 < pixels.shape[0] and j - 1 >= 0:  # [i+1, j-1]
-                g.add_edge(vertex_id,
-                           vertex_id + pixels.shape[1] - 1,
-                           weight=n_link_calc(pixels[i, j], pixels[i + 1, j - 1], beta))
-    return g
-
-
-def initalize_graph(pixels, beta):
-    g = ig.Graph()
-    add_nods(g, pixels)
-    add_n_links(g, pixels, beta)
-
-
-def add_nods(g, pixels):
-    # add nods to graph
-    for i in range(pixels.shape[0]):
-        for j in range(pixels.shape[1]):
-            vertex_id = i * pixels.shape[1] + j
-            g.add_vertex(vertex_id)
-    # add source and sink
-    g.add_vertex('s')
-    g.add_vertex('t')
-
-
 def initalize_GMMs(img, mask):
     beta = calc_beta(img)
     initalize_graph(img, beta)
@@ -210,8 +167,56 @@ def n_link_calc(img, i1, j1, i2, j2, beta):
     """
     n(x,y) = 50/dist(I(x),I(y)) * exp(-beta * ||I(x)-I(y)||^2)
     """
-    dist = distance_between_pixels(img[i1, j1] - img[i2, j2])
+    dist = distance_between_pixels(img[i1, j1], img[i2, j2])
+    if dist == 0:
+        return 0
     return 50 / dist * np.exp(-beta * dist ** 2)
+
+
+def add_n_links(g, pixels, beta):
+    for i in range(pixels.shape[0]):
+        for j in range(pixels.shape[1]):
+            vertex_id = i * pixels.shape[1] + j
+            # add n-links to graph for each neighboring pixel down and right diagonally down and right diagonally
+            # down and left
+            if i + 1 < pixels.shape[0]:  # [i+1, j]
+                weight = n_link_calc(pixels, i, j, i + 1, j, beta)
+                g.add_edge(vertex_id,
+                           vertex_id + pixels.shape[1],
+                           weight=weight)
+            if j + 1 < pixels.shape[1]:  # [i, j+1]
+                weight = n_link_calc(pixels, i, j, i, j + 1, beta)
+                g.add_edge(vertex_id,
+                           vertex_id + 1,
+                           weight=weight)
+            if i + 1 < pixels.shape[0] and j + 1 < pixels.shape[1]:  # [i+1, j+1]
+                weight = n_link_calc(pixels, i, j, i + 1, j + 1, beta)
+                g.add_edge(vertex_id,
+                           vertex_id + pixels.shape[1] + 1,
+                           weight=weight)
+            if i + 1 < pixels.shape[0] and j - 1 >= 0:  # [i+1, j-1]
+                weight = n_link_calc(pixels, i, j, i + 1, j - 1, beta)
+                g.add_edge(vertex_id,
+                           vertex_id + pixels.shape[1] - 1,
+                           weight=weight)
+    return g
+
+
+def initalize_graph(pixels, beta):
+    g = ig.Graph()
+    add_nods(g, pixels)
+    add_n_links(g, pixels, beta)
+
+
+def add_nods(g, pixels):
+    # add nods to graph
+    for i in range(pixels.shape[0]):
+        for j in range(pixels.shape[1]):
+            vertex_id = i * pixels.shape[1] + j
+            g.add_vertex(vertex_id)
+    # add source and sink
+    g.add_vertex('s')
+    g.add_vertex('t')
 
 
 def distance_between_pixels(pixel1, pixel2):
