@@ -10,6 +10,7 @@ GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
 GC_PR_BGD = 2  # Soft bg pixel
 GC_PR_FGD = 3  # Soft fg pixel
+global g, beta
 
 
 # Define the GrabCut algorithm function
@@ -44,8 +45,9 @@ def grabcut(img, rect, n_iter=5):
 
 
 def initalize_GMMs(img, mask):
-    beta = calc_beta(img)
-    initalize_graph(img, beta)
+    global g, beta
+    d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
+    initalize_graph(img, d_adjacent, d_below, diag1_n_link, diag2_n_link)
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
     bg_pixels = img[mask == 0].reshape(-1, 3)
@@ -136,87 +138,93 @@ def cal_metric(predicted_mask, gt_mask):
     return 100, 100
 
 
-def calc_beta(img):
-    """
-    Calculates the beta parameter for a given image.
-
-    Args:
-    img (numpy.ndarray): A 2D numpy array representing the image.
-
-    Returns:
-    float: The calculated beta value.
-    """
-
+def calc_beta_and_n_link(img):
+    global beta
+    row, col, dim = img.shape
     # Calculate the differences between adjacent pixels in the image
-    dx = np.diff(img, axis=1)
-    dy = np.diff(img, axis=0)
-    diag1 = list((img[i + 1, j + 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(img.shape[1] - 1)))
-    diag2 = list((img[i + 1, j - 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(1, img.shape[1])))
-    diag1 = np.array(diag1)
-    diag2 = np.array(diag2)
+    d_adjacent = np.diff(img, axis=1).reshape(-1, 3)  # I[i,j] - I[i,j+1]
+    d_below = np.diff(img, axis=0).reshape(-1, 3)  # I[i,j] - I[i+1,j]
+    diag1 = np.array(
+        list((img[i + 1, j + 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(img.shape[1] - 1))))
+    diag2 = np.array(
+        list((img[i + 1, j - 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(1, img.shape[1]))))
 
-    # Calculate the sum of squared differences
-    sum_m = np.sum(dx ** 2) + np.sum(dy ** 2) + np.sum(diag1 ** 2) + np.sum(diag2 ** 2)
-    count = dx.shape[0] + dy.shape[0] + diag1.shape[0] + diag2.shape[0]
+    diag1_sum_dist = np.array(list((np.sum(np.multiply(diag1[i], diag1[i])) for i in range(diag1.shape[0]))))
+    diag2_sum_dist = np.array(list((np.sum(np.multiply(diag2[i], diag2[i])) for i in range(diag2.shape[0]))))
+    dx_sum_dist = np.array(
+        list((np.sum(np.multiply(d_adjacent[i], d_adjacent[i])) for i in range(d_adjacent.shape[0]))))
+    dy_sum_dist = np.array(list((np.sum(np.multiply(d_below[i], d_below[i])) for i in range(d_below.shape[0]))))
+
+    # Calculate the sum of the squared differences
+    sum_m = sum(diag1_sum_dist) + sum(diag2_sum_dist) + sum(dx_sum_dist) + sum(dy_sum_dist)
+    count = d_adjacent.shape[0] + d_below.shape[0] + diag1.shape[0] + diag2.shape[0]
+
     # Calculate the beta parameter
     beta = 1 / (2 * (sum_m / count))
-    return beta
+
+    # Calculate the n-link weights
+    dx_n_link = n_link_calc(dx_sum_dist)
+    dy_n_link = n_link_calc(dy_sum_dist)
+    diag1_n_link = n_link_calc(diag1_sum_dist)
+    diag2_n_link = n_link_calc(diag2_sum_dist)
+
+    # Reshape the n-link weights to the image shape
+    dx_n_link = np.reshape(dx_n_link, (row, col - 1))
+    dy_n_link = np.reshape(dy_n_link, (row - 1, col))
+    diag1_n_link = np.reshape(diag1_n_link, (row - 1, col - 1))
+    diag2_n_link = np.reshape(diag2_n_link, (row - 1, col - 1))
+
+    return dx_n_link, dy_n_link, diag1_n_link, diag2_n_link
 
 
-def n_link_calc(img, i1, j1, i2, j2, beta):
+def n_link_calc(sum_dist_square):
+    global beta
+    return 50 * np.multiply(np.exp(-beta * sum_dist_square),
+                            np.where((sum_dist_square > 0), (1 / (np.sqrt(sum_dist_square))), 0))
+
+
+def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
+    global g
     """
-    n(x,y) = 50/dist(I(x),I(y)) * exp(-beta * ||I(x)-I(y)||^2)
+    # edge (i,j) -> (i,j+1) is dx_n_link[i,j]
+    # edge (i,j) -> (i+1,j) is dy_n_link[i,j]
+    # edge (i,j) -> (i+1,j+1) is diag1_n_link[i,j]
+    # edge (i,j) -> (i+1,j-1) is diag2_n_link[i,j]
     """
-    dist = distance_between_pixels(img[i1, j1], img[i2, j2])
-    if dist == 0:
-        return 0
-    return 50 / dist * np.exp(-beta * dist ** 2)
+    row, col = img.shape[:2]
+    for i in range(row):
+        for j in range(col):
+            from_vertex = "(" + str(i) + ',' + str(j) + ")"
+            if j < col - 1:
+                to_vertex = "(" + str(i) + ',' + str(j + 1) + ")"
+                g.add_edge(from_vertex, to_vertex, edge_attrs={'weight': dx_n_link[i, j]})
+            if i < row - 1:
+                to_vertex = "(" + str(i + 1) + ',' + str(j) + ")"
+                g.add_edge(from_vertex, to_vertex, edge_attrs={'weight': dy_n_link[i, j]})
+            if i < row - 1 and j < col - 1:
+                to_vertex = "(" + str(i + 1) + ',' + str(j + 1) + ")"
+                g.add_edge(from_vertex, to_vertex, edge_attrs={'weight': diag1_n_link[i, j]})
+                from_v = "(" + str(i + 1) + ',' + str(j + 1) + ")"
+                g.add_edge(from_v, from_vertex, edge_attrs={'weight': diag2_n_link[i, j]})
 
 
-def add_n_links(g, pixels, beta):
-    for i in range(pixels.shape[0]):
-        for j in range(pixels.shape[1]):
-            vertex_id = i * pixels.shape[1] + j
-            # add n-links to graph for each neighboring pixel down and right diagonally down and right diagonally
-            # down and left
-            if i + 1 < pixels.shape[0]:  # [i+1, j]
-                weight = n_link_calc(pixels, i, j, i + 1, j, beta)
-                g.add_edge(vertex_id,
-                           vertex_id + pixels.shape[1],
-                           weight=weight)
-            if j + 1 < pixels.shape[1]:  # [i, j+1]
-                weight = n_link_calc(pixels, i, j, i, j + 1, beta)
-                g.add_edge(vertex_id,
-                           vertex_id + 1,
-                           weight=weight)
-            if i + 1 < pixels.shape[0] and j + 1 < pixels.shape[1]:  # [i+1, j+1]
-                weight = n_link_calc(pixels, i, j, i + 1, j + 1, beta)
-                g.add_edge(vertex_id,
-                           vertex_id + pixels.shape[1] + 1,
-                           weight=weight)
-            if i + 1 < pixels.shape[0] and j - 1 >= 0:  # [i+1, j-1]
-                weight = n_link_calc(pixels, i, j, i + 1, j - 1, beta)
-                g.add_edge(vertex_id,
-                           vertex_id + pixels.shape[1] - 1,
-                           weight=weight)
-    return g
-
-
-def initalize_graph(pixels, beta):
+def initalize_graph(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
+    global g
     g = ig.Graph()
-    add_nods(g, pixels)
-    add_n_links(g, pixels, beta)
+    add_nods(img)
+    add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link)
 
 
-def add_nods(g, pixels):
+def add_nods(img):
+    global g
     # add nods to graph
-    for i in range(pixels.shape[0]):
-        for j in range(pixels.shape[1]):
-            vertex_id = i * pixels.shape[1] + j
-            g.add_vertex(vertex_id)
-    # add source and sink
     g.add_vertex('s')
     g.add_vertex('t')
+    for i in range(img.shape[0]):
+        for j in range(img.shape[1]):
+            vertex_id = "(" + str(i) + ',' + str(j) + ")"
+            g.add_vertex(vertex_id)
+    # add source and sink
 
 
 def distance_between_pixels(pixel1, pixel2):
