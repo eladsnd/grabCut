@@ -198,15 +198,39 @@ def add_n_links_edges(img, weights):
     g.add_edges(edges)
     g.es[WEIGHT] = weights
 
+def t_link(img, mask, bgGMM, fgGMM):
+    for pixel in img[mask > 0]:
+        t_link_calc(img, pixel,bgGMM,fgGMM)
+
+def t_link_calc(img, pixel, bgGMM, fgGMM):
+    sum_back = 0
+    sum_fore = 0
+
+    for i in range(5):
+        sum_back += calc_product(img, pixel, i, bgGMM)
+        sum_fore += calc_product(img, pixel, i, fgGMM)
+
+    t_link_source = -np.log(sum_back)
+    t_link_target = -np.log(sum_fore)
+    return t_link_source, t_link_target
+
+def calc_product(img, pixel, i, GMM):
+    left_factor = GMM['weights'][i] * (1/np.sqrt(GMM['dets'][i]))
+    right_factor = np.transpose((img[pixel]-GMM['means'][i])) * np.linalg.inv(GMM['covs'][i]) * (img[pixel]-GMM['means'][i])
+    right_factor = np.exp(0.5 * right_factor)
+
+    product = left_factor * right_factor
+
+    return product
 
 def init_graph(img, weights):
     global g
     g = ig.Graph()
-    add_nods(img)
+    add_nodes(img)
     add_n_links_edges(img, weights)
 
 
-def add_nods(img):
+def add_nodes(img):
     global g
     # add nods to graph
     g.add_vertex('s')
