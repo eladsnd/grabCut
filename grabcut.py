@@ -116,6 +116,9 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 
 
 def calculate_mincut(img, mask, bgGMM, fgGMM):
+    global g
+    min_cut, cut_partition = g.st_mincut(source='s', target='t', capacity='weight')
+
     min_cut = [[], []]
     energy = 0
     return min_cut, energy
@@ -198,6 +201,7 @@ def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     weights = np.concatenate((dx_n_link, dy_n_link, diag1_n_link, diag2_n_link))
     g.add_edges(edges)
     g.es['weight'] = weights
+
 
 def initalize_graph(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     global g
