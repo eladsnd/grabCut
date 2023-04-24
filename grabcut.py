@@ -140,7 +140,8 @@ def cal_metric(predicted_mask, gt_mask):
 
 def calc_beta_and_n_link(img):
     global beta
-    row, col, dim = img.shape
+    row = img.shape[0]
+    col = img.shape[1]
     # Calculate the differences between adjacent pixels in the image
     d_adjacent = np.diff(img, axis=1).reshape(-1, 3)  # I[i,j] - I[i,j+1]
     d_below = np.diff(img, axis=0).reshape(-1, 3)  # I[i,j] - I[i+1,j]
@@ -168,11 +169,25 @@ def calc_beta_and_n_link(img):
     diag1_n_link = n_link_calc(diag1_sum_dist)
     diag2_n_link = n_link_calc(diag2_sum_dist)
 
+    # make a tuples of n-links weights and edges for each direction
+    # dx_n_link = np.array(
+    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", dx_n_link[i * col + j])
+    #          for i in range(row) for j in range(col - 1)))
+    # dy_n_link = np.array(
+    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", dy_n_link[i * col + j])
+    #          for i in range(row - 1) for j in range(col)))
+    # diag1_n_link = np.array(
+    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", diag1_n_link[i * col + j])
+    #          for i in range(row - 1) for j in range(col - 1)))
+    # diag2_n_link = np.array(
+    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", diag2_n_link[i * col + j])
+    #          for i in range(row - 1) for j in range(1, col)))
+
     # Reshape the n-link weights to the image shape
-    dx_n_link = np.reshape(dx_n_link, (row, col - 1))
-    dy_n_link = np.reshape(dy_n_link, (row - 1, col))
-    diag1_n_link = np.reshape(diag1_n_link, (row - 1, col - 1))
-    diag2_n_link = np.reshape(diag2_n_link, (row - 1, col - 1))
+    # dx_n_link = np.reshape(dx_n_link, (row, col - 1))
+    # dy_n_link = np.reshape(dy_n_link, (row - 1, col))
+    # diag1_n_link = np.reshape(diag1_n_link, (row - 1, col - 1))
+    # diag2_n_link = np.reshape(diag2_n_link, (row - 1, col - 1))
 
     return dx_n_link, dy_n_link, diag1_n_link, diag2_n_link
 
@@ -185,28 +200,24 @@ def n_link_calc(sum_dist_square):
 
 def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     global g
-    """
-    # edge (i,j) -> (i,j+1) is dx_n_link[i,j]
-    # edge (i,j) -> (i+1,j) is dy_n_link[i,j]
-    # edge (i,j) -> (i+1,j+1) is diag1_n_link[i,j]
-    # edge (i,j) -> (i+1,j-1) is diag2_n_link[i,j]
-    """
-    row, col = img.shape[:2]
-    for i in range(row):
-        for j in range(col):
-            from_vertex = "(" + str(i) + ',' + str(j) + ")"
-            if j < col - 1:
-                to_vertex = "(" + str(i) + ',' + str(j + 1) + ")"
-                g.add_edge(from_vertex, to_vertex, edge_attrs={'weight': dx_n_link[i, j]})
-            if i < row - 1:
-                to_vertex = "(" + str(i + 1) + ',' + str(j) + ")"
-                g.add_edge(from_vertex, to_vertex, edge_attrs={'weight': dy_n_link[i, j]})
-            if i < row - 1 and j < col - 1:
-                to_vertex = "(" + str(i + 1) + ',' + str(j + 1) + ")"
-                g.add_edge(from_vertex, to_vertex, edge_attrs={'weight': diag1_n_link[i, j]})
-                from_v = "(" + str(i + 1) + ',' + str(j + 1) + ")"
-                g.add_edge(from_v, from_vertex, edge_attrs={'weight': diag2_n_link[i, j]})
+    row = img.shape[0]
+    col = img.shape[1]
 
+    # Add the n-link edges to the graph
+    dx_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i) + "," + str(j + 1) + ")")
+                    for i in range(row) for j in range(col - 1))
+    dy_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i + 1) + "," + str(j) + ")")
+                    for i in range(row - 1) for j in range(col))
+    diag1_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i + 1) + "," + str(j + 1) + ")")
+                       for i in range(row - 1) for j in range(col - 1))
+    diag2_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i) + "," + str(i + 1) + ")")
+                       for i in range(row - 1) for j in range(1, col))
+
+    # concatenate all edges and weights
+    edges = np.concatenate((dx_edges, dy_edges, diag1_edges, diag2_edges))
+    weights = np.concatenate((dx_n_link, dy_n_link, diag1_n_link, diag2_n_link))
+    g.add_edges(edges)
+    g.es['weight'] = weights
 
 def initalize_graph(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     global g
