@@ -10,6 +10,9 @@ GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
 GC_PR_BGD = 2  # Soft bg pixel
 GC_PR_FGD = 3  # Soft fg pixel
+
+WEIGHT = 'weight'
+
 global g, beta
 
 
@@ -47,7 +50,9 @@ def grabcut(img, rect, n_iter=5):
 def initalize_GMMs(img, mask):
     global g, beta
     d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
-    init_graph(img, d_adjacent, d_below, diag1_n_link, diag2_n_link)
+    weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
+
+    init_graph(img, weights)
 
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
@@ -82,7 +87,6 @@ def gmm_init():
            'means': np.zeros((n_components, 3)),
            'coves': np.zeros((n_components, 3, 3)),
            'dets': np.zeros(n_components)}
-
     return GMM
 
 
@@ -105,7 +109,7 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 
 def calculate_mincut(img, mask, bgGMM, fgGMM):
     global g
-    min_cut, cut_partition = g.st_mincut(source='s', target='t', capacity='weight')
+    min_cut, cut_partition = g.st_mincut(source='s', target='t', capacity=WEIGHT)
 
     min_cut = [[], []]
     energy = 0
@@ -141,26 +145,30 @@ def calc_beta_and_n_link(img):
     diag2 = np.array(
         list((img[i + 1, j - 1] - img[i, j] for i in range(row - 1) for j in range(1, col))))
 
-    diag1_sum_dist = np.array(list((np.sum(np.multiply(diag1[i], diag1[i])) for i in range(diag1.shape[0]))))
-    diag2_sum_dist = np.array(list((np.sum(np.multiply(diag2[i], diag2[i])) for i in range(diag2.shape[0]))))
-    dx_sum_dist = np.array(
-        list((np.sum(np.multiply(d_adjacent[i], d_adjacent[i])) for i in range(d_adjacent.shape[0]))))
-    dy_sum_dist = np.array(list((np.sum(np.multiply(d_below[i], d_below[i])) for i in range(d_below.shape[0]))))
+    dx_sum_dist_square = sum_distance_square(d_adjacent)
+    dy_sum_dist_square = sum_distance_square(d_below)
+    diag1_sum_dist_square = sum_distance_square(diag1)
+    diag2_sum_dist_square = sum_distance_square(diag2)
 
     # Calculate the sum of the squared differences
-    sum_m = sum(diag1_sum_dist) + sum(diag2_sum_dist) + sum(dx_sum_dist) + sum(dy_sum_dist)
-    count = d_adjacent.shape[0] + d_below.shape[0] + diag1.shape[0] + diag2.shape[0]
-
+    sum_m = sum(diag1_sum_dist_square) + sum(diag2_sum_dist_square) + sum(dx_sum_dist_square) + sum(dy_sum_dist_square)
+    nighbor_count = d_adjacent.shape[0] + d_below.shape[0] + diag1.shape[0] + diag2.shape[0]
     # Calculate the beta parameter
-    beta = 1 / (2 * (sum_m / count))
+    beta = 1 / (2 * (sum_m / nighbor_count))
 
     # Calculate the n-link weights
-    dx_n_link = n_link_calc(dx_sum_dist)
-    dy_n_link = n_link_calc(dy_sum_dist)
-    diag1_n_link = n_link_calc(diag1_sum_dist)
-    diag2_n_link = n_link_calc(diag2_sum_dist)
+    dx_n_link = n_link_calc(dx_sum_dist_square)
+    dy_n_link = n_link_calc(dy_sum_dist_square)
+    diag1_n_link = n_link_calc(diag1_sum_dist_square)
+    diag2_n_link = n_link_calc(diag2_sum_dist_square)
 
     return dx_n_link, dy_n_link, diag1_n_link, diag2_n_link
+
+
+def sum_distance_square(rgb_vector):
+    rgb_vector_sum_square = np.array(list((np.sum(np.multiply(rgb_vector[i], rgb_vector[i]))
+                                           for i in range(rgb_vector.shape[0]))))
+    return rgb_vector_sum_square
 
 
 def n_link_calc(sum_dist_square):
@@ -169,7 +177,7 @@ def n_link_calc(sum_dist_square):
                             np.where((sum_dist_square > 0), (1 / (np.sqrt(sum_dist_square))), 0))
 
 
-def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
+def add_n_links_edges(img, weights):
     global g
     row = img.shape[0]
     col = img.shape[1]
@@ -184,18 +192,18 @@ def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     diag2_edges = list((vertex_name(i, j), vertex_name(i + 1, j - 1))
                        for i in range(row - 1) for j in range(1, col))
 
-    # concatenate all edges and weights
+    # concatenate all weights
     edges = np.concatenate((dx_edges, dy_edges, diag1_edges, diag2_edges))
-    weights = np.concatenate((dx_n_link, dy_n_link, diag1_n_link, diag2_n_link))
+
     g.add_edges(edges)
-    g.es['weight'] = weights
+    g.es[WEIGHT] = weights
 
 
-def init_graph(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
+def init_graph(img, weights):
     global g
     g = ig.Graph()
     add_nods(img)
-    add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link)
+    add_n_links_edges(img, weights)
 
 
 def add_nods(img):
@@ -212,10 +220,6 @@ def add_nods(img):
 
 def vertex_name(i, j):
     return "(" + str(i) + ',' + str(j) + ")"
-
-
-def distance_between_pixels(pixel1, pixel2):
-    return np.linalg.norm(pixel1 - pixel2)
 
 
 def parse():
