@@ -22,7 +22,7 @@ def grabcut(img, rect, n_iter=5):
     w -= x
     h -= y
 
-    # Initalize the inner square to Foreground
+    # init the inner square to Foreground
     mask[y:y + h, x:x + w] = GC_PR_FGD
     mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
 
@@ -47,45 +47,43 @@ def grabcut(img, rect, n_iter=5):
 def initalize_GMMs(img, mask):
     global g, beta
     d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
-    initalize_graph(img, d_adjacent, d_below, diag1_n_link, diag2_n_link)
+    init_graph(img, d_adjacent, d_below, diag1_n_link, diag2_n_link)
+
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
     bg_pixels = img[mask == 0].reshape(-1, 3)
+
+    # Create an empty GMM for the foreground and background
+    fgGMM = gmm_init()
+    bgGMM = gmm_init()
 
     # Use KMeans to cluster the pixels into n_components clusters for each of foreground and background
     fg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(fg_pixels)
     bg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(bg_pixels)
 
-    # Create an empty GMM for the foreground and background
-    fgGMM = {
-        'weights': np.zeros(n_components),
-        'means': np.zeros((n_components, 3)),
-        'covs': np.zeros((n_components, 3, 3)),
-        'dets': np.zeros(n_components)
-    }
-
-    bgGMM = {
-        'weights': np.zeros(n_components),
-        'means': np.zeros((n_components, 3)),
-        'covs': np.zeros((n_components, 3, 3)),
-        'dets': np.zeros(n_components)}
-
     # Fill the GMM with the KMeans results
-    fgGMM['weights'] = np.full(n_components, 1 / n_components)
-    fgGMM['means'] = fg_kmeans.cluster_centers_
-    fgGMM['covs'] = np.array([np.cov(fg_pixels[fg_kmeans.labels_ == i].T) for i in range(n_components)])
-    fgGMM['dets'] = np.array([np.linalg.det(fgGMM['covs'][i]) for i in range(n_components)])
-    for i in range(n_components):
-        fgGMM['covs'][i] = np.linalg.inv(fgGMM['covs'][i])
+    gmm_fill(fgGMM, fg_kmeans, fg_pixels)
 
-    bgGMM['weights'] = np.full(n_components, 1 / n_components)
-    bgGMM['means'] = bg_kmeans.cluster_centers_
-    bgGMM['covs'] = np.array([np.cov(bg_pixels[bg_kmeans.labels_ == i].T) for i in range(n_components)])
-    bgGMM['dets'] = np.array([np.linalg.det(bgGMM['covs'][i]) for i in range(n_components)])
-    for i in range(n_components):
-        bgGMM['covs'][i] = np.linalg.inv(bgGMM['covs'][i])
+    gmm_fill(bgGMM, bg_kmeans, bg_pixels)
 
     return fgGMM, bgGMM
+
+
+def gmm_fill(GMM, kmeans, pixels):
+    GMM['means'] = kmeans.cluster_centers_
+    GMM['coves'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
+    GMM['dets'] = np.array([np.linalg.det(GMM['coves'][i]) for i in range(n_components)])
+    for i in range(n_components):
+        GMM['coves'][i] = np.linalg.inv(GMM['coves'][i])
+
+
+def gmm_init():
+    GMM = {'weights': np.full(n_components, 1 / n_components),
+           'means': np.zeros((n_components, 3)),
+           'coves': np.zeros((n_components, 3, 3)),
+           'dets': np.zeros(n_components)}
+
+    return GMM
 
 
 # Define helper functions for the GrabCut algorithm
@@ -99,19 +97,9 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     bg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(bg_pixels)
 
     # Fill the GMM with the KMeans results
-    # fgGMM['weights'] = np.full(n_components, 1 / n_components)
-    fgGMM['means'] = fg_kmeans.cluster_centers_
-    fgGMM['covs'] = np.array([np.cov(fg_pixels[fg_kmeans.labels_ == i].T) for i in range(n_components)])
-    fgGMM['dets'] = np.array([np.linalg.det(fgGMM['covs'][i]) for i in range(n_components)])
-    for i in range(n_components):
-        fgGMM['covs'][i] = np.linalg.inv(fgGMM['covs'][i])
+    gmm_fill(fgGMM, fg_kmeans, fg_pixels)
+    gmm_fill(bgGMM, bg_kmeans, bg_pixels)
 
-    # bgGMM['weights'] = np.full(n_components, 1 / n_components)
-    bgGMM['means'] = bg_kmeans.cluster_centers_
-    bgGMM['covs'] = np.array([np.cov(bg_pixels[bg_kmeans.labels_ == i].T) for i in range(n_components)])
-    bgGMM['dets'] = np.array([np.linalg.det(bgGMM['covs'][i]) for i in range(n_components)])
-    for i in range(n_components):
-        bgGMM['covs'][i] = np.linalg.inv(bgGMM['covs'][i])
     return bgGMM, fgGMM
 
 
@@ -187,13 +175,13 @@ def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     col = img.shape[1]
 
     # Add the n-link edges to the graph
-    dx_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i) + "," + str(j + 1) + ")")
+    dx_edges = list((vertex_name(i, j), vertex_name(i, j + 1))
                     for i in range(row) for j in range(col - 1))
-    dy_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i + 1) + "," + str(j) + ")")
+    dy_edges = list((vertex_name(i, j), vertex_name(i + 1, j))
                     for i in range(row - 1) for j in range(col))
-    diag1_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i + 1) + "," + str(j + 1) + ")")
+    diag1_edges = list((vertex_name(i, j), vertex_name(i + 1, j + 1))
                        for i in range(row - 1) for j in range(col - 1))
-    diag2_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i) + "," + str(i + 1) + ")")
+    diag2_edges = list((vertex_name(i, j), vertex_name(i + 1, j - 1))
                        for i in range(row - 1) for j in range(1, col))
 
     # concatenate all edges and weights
@@ -203,7 +191,7 @@ def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     g.es['weight'] = weights
 
 
-def initalize_graph(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
+def init_graph(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     global g
     g = ig.Graph()
     add_nods(img)
@@ -217,9 +205,13 @@ def add_nods(img):
     g.add_vertex('t')
     for i in range(img.shape[0]):
         for j in range(img.shape[1]):
-            vertex_id = "(" + str(i) + ',' + str(j) + ")"
+            vertex_id = vertex_name(i, j)
             g.add_vertex(vertex_id)
     # add source and sink
+
+
+def vertex_name(i, j):
+    return "(" + str(i) + ',' + str(j) + ")"
 
 
 def distance_between_pixels(pixel1, pixel2):
