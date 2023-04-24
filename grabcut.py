@@ -146,9 +146,9 @@ def calc_beta_and_n_link(img):
     d_adjacent = np.diff(img, axis=1).reshape(-1, 3)  # I[i,j] - I[i,j+1]
     d_below = np.diff(img, axis=0).reshape(-1, 3)  # I[i,j] - I[i+1,j]
     diag1 = np.array(
-        list((img[i + 1, j + 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(img.shape[1] - 1))))
+        list((img[i + 1, j + 1] - img[i, j] for i in range(row - 1) for j in range(col - 1))))
     diag2 = np.array(
-        list((img[i + 1, j - 1] - img[i, j] for i in range(img.shape[0] - 1) for j in range(1, img.shape[1]))))
+        list((img[i + 1, j - 1] - img[i, j] for i in range(row - 1) for j in range(1, col))))
 
     diag1_sum_dist = np.array(list((np.sum(np.multiply(diag1[i], diag1[i])) for i in range(diag1.shape[0]))))
     diag2_sum_dist = np.array(list((np.sum(np.multiply(diag2[i], diag2[i])) for i in range(diag2.shape[0]))))
@@ -168,26 +168,6 @@ def calc_beta_and_n_link(img):
     dy_n_link = n_link_calc(dy_sum_dist)
     diag1_n_link = n_link_calc(diag1_sum_dist)
     diag2_n_link = n_link_calc(diag2_sum_dist)
-
-    # make a tuples of n-links weights and edges for each direction
-    # dx_n_link = np.array(
-    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", dx_n_link[i * col + j])
-    #          for i in range(row) for j in range(col - 1)))
-    # dy_n_link = np.array(
-    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", dy_n_link[i * col + j])
-    #          for i in range(row - 1) for j in range(col)))
-    # diag1_n_link = np.array(
-    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", diag1_n_link[i * col + j])
-    #          for i in range(row - 1) for j in range(col - 1)))
-    # diag2_n_link = np.array(
-    #     list(("(" + str(i) + "," + str(j) + ")" + ",+""(" + str(i) + "," + str(i + 1) + ")", diag2_n_link[i * col + j])
-    #          for i in range(row - 1) for j in range(1, col)))
-
-    # Reshape the n-link weights to the image shape
-    # dx_n_link = np.reshape(dx_n_link, (row, col - 1))
-    # dy_n_link = np.reshape(dy_n_link, (row - 1, col))
-    # diag1_n_link = np.reshape(diag1_n_link, (row - 1, col - 1))
-    # diag2_n_link = np.reshape(diag2_n_link, (row - 1, col - 1))
 
     return dx_n_link, dy_n_link, diag1_n_link, diag2_n_link
 
