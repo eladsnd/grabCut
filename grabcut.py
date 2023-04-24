@@ -187,13 +187,13 @@ def add_n_links_edges(img, dx_n_link, dy_n_link, diag1_n_link, diag2_n_link):
     col = img.shape[1]
 
     # Add the n-link edges to the graph
-    dx_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i) + "," + str(j + 1) + ")")
+    dx_edges = list((vertex_name(i, j), vertex_name(i, j + 1))
                     for i in range(row) for j in range(col - 1))
-    dy_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i + 1) + "," + str(j) + ")")
+    dy_edges = list((vertex_name(i, j), vertex_name(i + 1, j))
                     for i in range(row - 1) for j in range(col))
-    diag1_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i + 1) + "," + str(j + 1) + ")")
+    diag1_edges = list((vertex_name(i, j),vertex_name(i + 1, j + 1))
                        for i in range(row - 1) for j in range(col - 1))
-    diag2_edges = list(("(" + str(i) + "," + str(j) + ")", "(" + str(i) + "," + str(i + 1) + ")")
+    diag2_edges = list((vertex_name(i, j), vertex_name(i+1, j-1))
                        for i in range(row - 1) for j in range(1, col))
 
     # concatenate all edges and weights
@@ -217,9 +217,13 @@ def add_nods(img):
     g.add_vertex('t')
     for i in range(img.shape[0]):
         for j in range(img.shape[1]):
-            vertex_id = "(" + str(i) + ',' + str(j) + ")"
+            vertex_id = vertex_name(i, j)
             g.add_vertex(vertex_id)
     # add source and sink
+
+
+def vertex_name(i, j):
+    return "(" + str(i) + ',' + str(j) + ")"
 
 
 def distance_between_pixels(pixel1, pixel2):
