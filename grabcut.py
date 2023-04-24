@@ -68,6 +68,13 @@ def add_n_links(g, pixels, beta):
                            weight=n_link_calc(pixels[i, j], pixels[i + 1, j - 1], beta))
     return g
 
+def n_link_calc(img, i1, j1, i2, j2, beta):
+    """
+    n(x,y) = 50/dist(I(x),I(y)) * exp(-beta * ||I(x)-I(y)||^2)
+    """
+    dist = distance_between_pixels(img[i1, j1] - img[i2, j2])
+    return 50 / dist * np.exp(-beta * dist ** 2)
+
 
 def initalize_graph(pixels, beta):
     g = ig.Graph()
@@ -161,6 +168,31 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     energy = 0
     return min_cut, energy
 
+def t_link(img, mask, bgGMM, fgGMM):
+    for pixel in img[mask > 0]:
+        t_link_calc(img, pixel,bgGMM,fgGMM)
+
+def t_link_calc(img, pixel, bgGMM, fgGMM):
+    sum_back = 0
+    sum_fore = 0
+
+    for i in range(5):
+        sum_back += calc_product(img, pixel, i, bgGMM)
+        sum_fore += calc_product(img, pixel, i, fgGMM)
+
+    t_link_source = -np.log(sum_back)
+    t_link_target = -np.log(sum_fore)
+    return t_link_source, t_link_target
+
+def calc_product(img, pixel, i, GMM):
+    left_factor = GMM['weights'][i] * (1/np.sqrt(GMM['dets'][i]))
+    right_factor = np.transpose((img[pixel]-GMM['means'][i])) * np.linalg.inv(GMM['covs'][i]) * (img[pixel]-GMM['means'][i])
+    right_factor = np.exp(0.5 * right_factor)
+
+    product = left_factor * right_factor
+
+    return product
+
 
 def update_mask(mincut_sets, mask):
     # TODO: implement mask update step
@@ -204,14 +236,6 @@ def calc_beta(img):
     # Calculate the beta parameter
     beta = 1 / (2 * (sum_m / count))
     return beta
-
-
-def n_link_calc(img, i1, j1, i2, j2, beta):
-    """
-    n(x,y) = 50/dist(I(x),I(y)) * exp(-beta * ||I(x)-I(y)||^2)
-    """
-    dist = distance_between_pixels(img[i1, j1] - img[i2, j2])
-    return 50 / dist * np.exp(-beta * dist ** 2)
 
 
 def distance_between_pixels(pixel1, pixel2):
