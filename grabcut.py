@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import cv2
 import argparse
@@ -13,7 +15,7 @@ GC_PR_FGD = 3  # Soft fg pixel
 
 WEIGHT = 'weight'
 
-global g, beta
+global g, beta, row, col
 
 
 # Define the GrabCut algorithm function
@@ -48,7 +50,8 @@ def grabcut(img, rect, n_iter=5):
 
 
 def initalize_GMMs(img, mask):
-    global g, beta
+    global g, beta, row, col
+    row, col = img.shape[:2]
     d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
     weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
 
@@ -63,8 +66,8 @@ def initalize_GMMs(img, mask):
     bgGMM = gmm_init()
 
     # Use KMeans to cluster the pixels into n_components clusters for each of foreground and background
-    fg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(fg_pixels)
-    bg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(bg_pixels)
+    fg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(fg_pixels)
+    bg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(bg_pixels)
 
     # Fill the GMM with the KMeans results
     gmm_fill(fgGMM, fg_kmeans, fg_pixels)
@@ -78,8 +81,11 @@ def gmm_fill(GMM, kmeans, pixels):
     GMM['means'] = kmeans.cluster_centers_
     GMM['coves'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
     GMM['dets'] = np.array([np.linalg.det(GMM['coves'][i]) for i in range(n_components)])
-    for i in range(n_components):
-        GMM['coves'][i] = np.linalg.inv(GMM['coves'][i])
+    # for i in range(n_components):
+    #     GMM['coves'][i] = np.linalg.inv(GMM['coves'][i])
+
+    # add epsilon to avoid singular matrix
+    GMM['coves'] += np.eye(3) * 1e-6
 
 
 def gmm_init():
@@ -109,6 +115,9 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 
 def calculate_mincut(img, mask, bgGMM, fgGMM):
     global g
+
+    t_s2, t_t2 = t_link(img, mask, bgGMM, fgGMM)
+
     min_cut, cut_partition = g.st_mincut(source='s', target='t', capacity=WEIGHT)
 
     min_cut = [[], []]
@@ -134,9 +143,8 @@ def cal_metric(predicted_mask, gt_mask):
 
 
 def calc_beta_and_n_link(img):
-    global beta
-    row = img.shape[0]
-    col = img.shape[1]
+    global beta, row, col
+
     # Calculate the differences between adjacent pixels in the image
     d_adjacent = np.diff(img, axis=1).reshape(-1, 3)  # I[i,j] - I[i,j+1]
     d_below = np.diff(img, axis=0).reshape(-1, 3)  # I[i,j] - I[i+1,j]
@@ -178,10 +186,7 @@ def n_link_calc(sum_dist_square):
 
 
 def add_n_links_edges(img, weights):
-    global g
-    row = img.shape[0]
-    col = img.shape[1]
-
+    global g, row, col
     # Add the n-link edges to the graph
     dx_edges = list((vertex_name(i, j), vertex_name(i, j + 1))
                     for i in range(row) for j in range(col - 1))
@@ -198,45 +203,52 @@ def add_n_links_edges(img, weights):
     g.add_edges(edges)
     g.es[WEIGHT] = weights
 
+
 def t_link(img, mask, bgGMM, fgGMM):
-    for pixel in img[mask > 0]:
-        t_link_calc(img, pixel,bgGMM,fgGMM)
+    img_masked = img[mask > 0]
+    t_link_source, t_link_target = t_link_calc(img_masked, bgGMM, fgGMM)
+    return -np.log(t_link_source), -np.log(t_link_target)
 
-def t_link_calc(img, pixel, bgGMM, fgGMM):
-    sum_back = 0
-    sum_fore = 0
 
-    for i in range(5):
-        sum_back += calc_product(img, pixel, i, bgGMM)
-        sum_fore += calc_product(img, pixel, i, fgGMM)
+def t_link_calc(img_masked, bgGMM, fgGMM):
+    # Calculate the numerator and denominator for the t-link equations
+    diff_back = img_masked[:, np.newaxis] - bgGMM['means'][np.newaxis]
+    diff_fore = img_masked[:, np.newaxis] - fgGMM['means'][np.newaxis]
 
-    t_link_source = -np.log(sum_back)
-    t_link_target = -np.log(sum_fore)
+    covs_back_inv = np.linalg.inv(bgGMM['coves'])
+    covs_fore_inv = np.linalg.inv(fgGMM['coves'])
+
+    left_factor_back = bgGMM['weights'] * (1 / np.sqrt(bgGMM['dets']))
+    left_factor_fore = fgGMM['weights'] * (1 / np.sqrt(fgGMM['dets']))
+
+    ut_a_u_back = np.array(list(
+        (diff_back[i][j] @ covs_back_inv[j]) @ diff_back[i][j] for i in range(diff_back.shape[0]) for j in
+        range(5))).reshape(diff_back.shape[0], 5)
+    ut_a_u_fore = np.array(list(
+        (diff_fore[i][j] @ covs_fore_inv[j]) @ diff_fore[i][j] for i in range(diff_fore.shape[0]) for j in
+        range(5))).reshape(diff_fore.shape[0], 5)
+
+    # Calculate the t-link source and target values
+    t_link_source = np.sum(np.multiply(left_factor_back, np.exp(-0.5 * ut_a_u_back)), axis=1)
+    t_link_target = np.sum(np.multiply(left_factor_fore, np.exp(-0.5 * ut_a_u_fore)), axis=1)
+
     return t_link_source, t_link_target
 
-def calc_product(img, pixel, i, GMM):
-    left_factor = GMM['weights'][i] * (1/np.sqrt(GMM['dets'][i]))
-    right_factor = np.transpose((img[pixel]-GMM['means'][i])) * np.linalg.inv(GMM['covs'][i]) * (img[pixel]-GMM['means'][i])
-    right_factor = np.exp(0.5 * right_factor)
-
-    product = left_factor * right_factor
-
-    return product
 
 def init_graph(img, weights):
     global g
     g = ig.Graph()
-    add_nodes(img)
+    add_nodes()
     add_n_links_edges(img, weights)
 
 
-def add_nodes(img):
-    global g
+def add_nodes():
+    global g, row, col
     # add nods to graph
     g.add_vertex('s')
     g.add_vertex('t')
-    for i in range(img.shape[0]):
-        for j in range(img.shape[1]):
+    for i in range(row):
+        for j in range(col):
             vertex_id = vertex_name(i, j)
             g.add_vertex(vertex_id)
     # add source and sink
