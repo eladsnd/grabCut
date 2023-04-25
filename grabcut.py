@@ -142,12 +142,13 @@ def cal_metric(predicted_mask, gt_mask):
     return 100, 100
 
 
-def calc_beta_and_n_link(img):
+def calc_beta_and_n_link(img_):
     global beta, row, col
-
+    img = img_.astype(np.int16)
     # Calculate the differences between adjacent pixels in the image
-    d_adjacent = np.diff(img, axis=1).reshape(-1, 3)  # I[i,j] - I[i,j+1]
-    d_below = np.diff(img, axis=0).reshape(-1, 3)  # I[i,j] - I[i+1,j]
+    d_adjacent = np.diff(img, axis=1).reshape(-1, 3) # I[i,j +1] - I[i,j]
+    d_adjacent =d_adjacent.astype(np.int16)
+    d_below = np.diff(img, axis=0).reshape(-1, 3)  # I[i+1,j] - I[i,j]
     diag1 = np.array(
         list((img[i + 1, j + 1] - img[i, j] for i in range(row - 1) for j in range(col - 1))))
     diag2 = np.array(
