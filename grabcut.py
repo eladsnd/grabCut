@@ -174,9 +174,9 @@ def calc_beta_and_n_link(img_):
 
     # Calculate the sum of the squared differences
     sum_m = sum(diag1_sum_dist_square) + sum(diag2_sum_dist_square) + sum(dx_sum_dist_square) + sum(dy_sum_dist_square)
-    nighbor_count = d_adjacent.shape[0] + d_below.shape[0] + diag1.shape[0] + diag2.shape[0]
+    neighbor_count = d_adjacent.shape[0] + d_below.shape[0] + diag1.shape[0] + diag2.shape[0]
     # Calculate the beta parameter
-    beta = 1 / (2 * (sum_m / nighbor_count))
+    beta = 1 / (2 * (sum_m / neighbor_count))
 
     # Calculate the n-link weights
     dx_n_link = n_link_calc(dx_sum_dist_square)
@@ -231,8 +231,8 @@ def t_link_calc(img_masked, bgGMM, fgGMM):
     diff_back = img_masked[:, np.newaxis] - bgGMM['means'][np.newaxis]
     diff_fore = img_masked[:, np.newaxis] - fgGMM['means'][np.newaxis]
 
-    covs_back_inv = np.linalg.inv(bgGMM['coves'])
-    covs_fore_inv = np.linalg.inv(fgGMM['coves'])
+    covs_back_inv = np.linalg.inv(bgGMM['covs'])
+    covs_fore_inv = np.linalg.inv(fgGMM['covs'])
 
     left_factor_back = bgGMM['weights'] * (1 / np.sqrt(bgGMM['dets']))
     left_factor_fore = fgGMM['weights'] * (1 / np.sqrt(fgGMM['dets']))
@@ -247,6 +247,8 @@ def t_link_calc(img_masked, bgGMM, fgGMM):
     # Calculate the t-link source and target values
     t_link_source = np.sum(np.multiply(left_factor_back, np.exp(-0.5 * ut_a_u_back)), axis=1)
     t_link_target = np.sum(np.multiply(left_factor_fore, np.exp(-0.5 * ut_a_u_fore)), axis=1)
+
+    # What about the -log of the summation?
 
     return t_link_source, t_link_target
 
@@ -273,19 +275,19 @@ def add_nodes():
 
 def gmm_fill(GMM, kmeans, pixels):
     GMM['means'] = kmeans.cluster_centers_
-    GMM['coves'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
-    GMM['dets'] = np.array([np.linalg.det(GMM['coves'][i]) for i in range(n_components)])
+    GMM['covs'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
+    GMM['dets'] = np.array([np.linalg.det(GMM['covs'][i]) for i in range(n_components)])
     # for i in range(n_components):
-    #     GMM['coves'][i] = np.linalg.inv(GMM['coves'][i])
+    #     GMM['covs'][i] = np.linalg.inv(GMM['covs'][i])
 
     # add epsilon to avoid singular matrix
-    GMM['coves'] += np.eye(3) * 1e-6
+    GMM['covs'] += np.eye(3) * 1e-6
 
 
 def gmm_init():
     GMM = {'weights': np.full(n_components, 1 / n_components),
            'means': np.zeros((n_components, 3)),
-           'coves': np.zeros((n_components, 3, 3)),
+           'covs': np.zeros((n_components, 3, 3)),
            'dets': np.zeros(n_components)}
     return GMM
 
