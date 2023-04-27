@@ -15,7 +15,7 @@ GC_PR_FGD = 3  # Soft fg pixel
 
 WEIGHT = 'weight'
 
-global g, beta, row, col, number_of_existing_edges
+global g, beta, row, col, number_of_existing_edges, prev_energy
 
 # k = infinity
 K = 1e9
@@ -23,6 +23,7 @@ K = 1e9
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
+    global prev_energy
     # Assign initial labels to the pixels based on the bounding box
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
@@ -38,29 +39,37 @@ def grabcut(img, rect, n_iter=5):
 
     num_iters = 1000
     for i in range(num_iters):
+        print("\nIteration:_______________ ", i)
         # Update GMM
+        GMMUPDATE = time.time()
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
-
+        GMMUEND = time.time()
+        print("GMM Update Time:_________", GMMUEND - GMMUPDATE)
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
-
+        MASKUPDATE = time.time()
+        print("MinCut Time :____________", MASKUPDATE - GMMUEND)
         mask = update_mask(mincut_sets, mask)
-
+        MASKUEND = time.time()
+        print("Mask Update Time:________", MASKUEND - MASKUPDATE)
         if check_convergence(energy):
             break
-
+        CHECKCONV = time.time()
+        print("Check Convergence Time:__", CHECKCONV - MASKUEND)
+        print("energy:_________________ ", energy)
     # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
 
 def initalize_GMMs(img, mask):
-    global g, beta, row, col
+    global g, beta, row, col, prev_energy
+    # init
     row, col = img.shape[:2]
     d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
 
     weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
 
-    init_graph(img, weights)
-
+    init_graph(weights)
+    prev_energy = 0
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
     bg_pixels = img[mask == 0].reshape(-1, 3)
@@ -88,8 +97,8 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     bg_pixels = img[mask == 0].reshape(-1, 3)
 
     # Use KMeans to cluster the pixels into n_components clusters for each of foreground and background
-    fg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(fg_pixels)
-    bg_kmeans = KMeans(n_clusters=n_components, random_state=0).fit(bg_pixels)
+    fg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(fg_pixels)
+    bg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(bg_pixels)
 
     # Fill the GMM with the KMeans results
     gmm_fill(fgGMM, fg_kmeans, fg_pixels)
@@ -127,25 +136,40 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
     energy = min_cut.value
     min_cut = min_cut.partition
+    # rename the min_cut sets using the vertex_name function
     return min_cut, energy
 
 
 def map_mask_to_img(mask):
     front = np.transpose(np.nonzero(mask))
-    back = np.transpose(np.nonzero(3 - mask))
+    back = np.transpose(np.nonzero(3 - mask) or np.nonzero(1 - mask))
     front_pos = [vertex_name(front[i][0], front[i][1]) for i in range(front.shape[0])]
     back_pos = [vertex_name(back[i][0], back[i][1]) for i in range(back.shape[0])]
     return front_pos, back_pos
 
 
 def update_mask(mincut_sets, mask):
-    # TODO: implement mask update step
+    global row, col
+    # get the foreground and background pixels from the mincut sets
+    foreground = mincut_sets[1][1:]
+
+    # create a mask with the same size as the image
+    mask = np.zeros((row, col)).flatten()
+
+    mask[foreground] = GC_PR_FGD
+
+    mask = mask.reshape((row, col))
+
     return mask
 
 
 def check_convergence(energy):
-    # TODO: implement convergence check
+    global prev_energy
+    print("convergence:_____________", 1e-5*(energy - prev_energy))
+    if abs(energy - prev_energy) < 1e-5*energy:
+        convergence = True
     convergence = False
+    prev_energy = energy
     return convergence
 
 
@@ -199,7 +223,7 @@ def n_link_calc(sum_dist_square):
                             np.where((sum_dist_square > 0), (1 / (np.sqrt(sum_dist_square))), 0))
 
 
-def add_n_links_edges(img, weights):
+def add_n_links_edges(weights):
     global g, row, col, number_of_existing_edges
     # Add the n-link edges to the graph
     dx_edges = list((vertex_name(i, j), vertex_name(i, j + 1))
@@ -252,11 +276,11 @@ def t_link_calc(img_masked, bgGMM, fgGMM):
 
 
 # TODO: maybe vectorize the function
-def init_graph(img, weights):
+def init_graph(weights):
     global g
     g = ig.Graph()
     add_nodes()
-    add_n_links_edges(img, weights)
+    add_n_links_edges(weights)
 
 
 def add_nodes():
@@ -290,8 +314,16 @@ def gmm_init():
     return GMM
 
 
+def name_to_vertex(name):
+    global col
+
+    return int(name) // col, int(name) % col
+
+
 def vertex_name(i, j):
-    return "(" + str(i) + ',' + str(j) + ")"
+    global col
+    # return str(i) + ',' + str(j)
+    return i * col + j
 
 
 def parse():
