@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import cv2
@@ -18,12 +19,12 @@ WEIGHT = 'weight'
 global g, beta, row, col, number_of_existing_edges, prev_energy, prev_diff
 
 # k = infinity
-K = 1e9
+K = 50000
 
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
-    global prev_energy , prev_diff
+    global prev_energy, prev_diff
     # Assign initial labels to the pixels based on the bounding box
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
@@ -34,9 +35,10 @@ def grabcut(img, rect, n_iter=5):
     # init the inner square to Foreground
     mask[y:y + h, x:x + w] = GC_PR_FGD
     mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
-
+    INIT = time.time()
     bgGMM, fgGMM = initalize_GMMs(img, mask)
-
+    INITEND = time.time()
+    print("Initialization Time:_____", INITEND - INIT)
     num_iters = 1000
     for i in range(num_iters):
         print("\nIteration:_______________ ", i)
@@ -56,19 +58,19 @@ def grabcut(img, rect, n_iter=5):
         CHECKCONV = time.time()
         print("Check Convergence Time:__", CHECKCONV - MASKUEND)
         print("energy:_________________ ", energy)
+
+
     # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
 
 def initalize_GMMs(img, mask):
     global g, beta, row, col, prev_energy, prev_diff
-    debug = False
     # init
     row, col = img.shape[:2]
-    if not debug:
-        d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
-        weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
-        init_graph(weights)
+    d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
+    weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
+    init_graph(weights)
 
     prev_energy = 0
     prev_diff = 0
@@ -139,6 +141,8 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
     energy = min_cut.value
     min_cut = min_cut.partition
+    # s = min_cut[0]
+    # t = min_cut[1]
     # rename the min_cut sets using the vertex_name function
     return min_cut, energy
 
@@ -154,12 +158,12 @@ def map_mask_to_img(mask):
 def update_mask(mincut_sets, mask):
     global row, col
     # get the foreground and background pixels from the mincut sets
-    foreground = mincut_sets[1][1:]
+    foreground = np.array(mincut_sets[0][1:]) - 2
 
     # create a mask with the same size as the image
     mask = np.zeros((row, col)).flatten()
 
-    mask[foreground] = GC_PR_FGD
+    mask[foreground] = GC_FGD
 
     mask = mask.reshape((row, col))
 
@@ -169,7 +173,8 @@ def update_mask(mincut_sets, mask):
 def check_convergence(energy):
     global prev_energy, prev_diff
     curr_diff = abs(energy - prev_energy)
-    if curr_diff - prev_diff < 0.01:
+    print("curr_diff: ", curr_diff, "prev_diff: ", prev_diff, "curr Diff - prev diff: ", curr_diff - prev_diff)
+    if curr_diff < 0.01:
         convergence = True
         return convergence
     prev_diff = curr_diff
@@ -179,9 +184,13 @@ def check_convergence(energy):
 
 
 def cal_metric(predicted_mask, gt_mask):
-    # TODO: implement metric calculation
-
-    return 100, 100
+    # (the number of pixels that are correctly labeled divided by the total number of pixels in the image)
+    correctly_labeled = np.sum(predicted_mask == gt_mask)
+    total_pixels = gt_mask.shape[0] * gt_mask.shape[1]
+    metric = correctly_labeled / total_pixels
+    # Jaccard similarity (the intersection over the union of your predicted foreground region with the ground truth)
+    jaccard = np.sum(np.logical_and(predicted_mask, gt_mask)) / np.sum(np.logical_or(predicted_mask, gt_mask))
+    return metric, jaccard
 
 
 def calc_beta_and_n_link(img_):
@@ -259,24 +268,26 @@ def t_link_calc(img_masked, bgGMM, fgGMM):
     diff_back = img_masked[:, np.newaxis] - bgGMM['means'][np.newaxis]
     diff_fore = img_masked[:, np.newaxis] - fgGMM['means'][np.newaxis]
 
-    covs_back_inv = bgGMM['covs']
-    covs_fore_inv = fgGMM['covs']
-
     left_factor_back = bgGMM['weights'] * bgGMM['dets']
     left_factor_fore = fgGMM['weights'] * fgGMM['dets']
 
-    ut_a_u_back = np.array(list(
-        (diff_back[i][j] @ covs_back_inv[j]) @ diff_back[i][j] for i in range(diff_back.shape[0]) for j in
-        range(5))).reshape(diff_back.shape[0], 5)
-    ut_a_u_fore = np.array(list(
-        (diff_fore[i][j] @ covs_fore_inv[j]) @ diff_fore[i][j] for i in range(diff_fore.shape[0]) for j in
-        range(5))).reshape(diff_fore.shape[0], 5)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        ut_a_u_back = executor.submit(compute_ut_a_u, diff_back, bgGMM['covs'], left_factor_back)
+        ut_a_u_fore = executor.submit(compute_ut_a_u, diff_fore, fgGMM['covs'], left_factor_fore)
 
-    # Calculate the t-link source and target values
-    t_link_source = np.sum(np.multiply(left_factor_back, np.exp(-0.5 * ut_a_u_back)), axis=1)
-    t_link_target = np.sum(np.multiply(left_factor_fore, np.exp(-0.5 * ut_a_u_fore)), axis=1)
+        # Wait for both threads to finish
+    ut_a_u_back = ut_a_u_back.result()
+    ut_a_u_fore = ut_a_u_fore.result()
 
-    return t_link_source, t_link_target
+    return ut_a_u_back, ut_a_u_fore
+
+
+def compute_ut_a_u(diff, covs_inv, left_factor):
+    ut_a_u = np.array(list(
+        (diff[i][j] @ covs_inv[j]) @ diff[i][j] for i in range(diff.shape[0]) for j in range(5))).reshape(diff.shape[0],
+                                                                                                          5)
+    t_link_ = np.sum(np.multiply(left_factor, np.exp(-0.5 * ut_a_u)), axis=1)
+    return t_link_
 
 
 # TODO: maybe vectorize the function
@@ -290,13 +301,13 @@ def init_graph(weights):
 def add_nodes():
     global g, row, col
     # add nods to graph
-    g.add_vertex('s')
-    g.add_vertex('t')
     for i in range(row):
         for j in range(col):
             vertex_id = vertex_name(i, j)
             g.add_vertex(vertex_id)
     # add source and sink
+    g.add_vertex('s')
+    g.add_vertex('t')
 
 
 def gmm_fill(GMM, kmeans, pixels):
