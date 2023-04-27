@@ -15,7 +15,7 @@ GC_PR_FGD = 3  # Soft fg pixel
 
 WEIGHT = 'weight'
 
-global g, beta, row, col, number_of_existing_edges, prev_energy
+global g, beta, row, col, number_of_existing_edges, prev_energy, prev_diff
 
 # k = infinity
 K = 1e9
@@ -23,7 +23,7 @@ K = 1e9
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
-    global prev_energy
+    global prev_energy , prev_diff
     # Assign initial labels to the pixels based on the bounding box
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
@@ -61,15 +61,18 @@ def grabcut(img, rect, n_iter=5):
 
 
 def initalize_GMMs(img, mask):
-    global g, beta, row, col, prev_energy
+    global g, beta, row, col, prev_energy, prev_diff
+    debug = False
     # init
     row, col = img.shape[:2]
-    d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
+    if not debug:
+        d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
+        weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
+        init_graph(weights)
 
-    weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
-
-    init_graph(weights)
     prev_energy = 0
+    prev_diff = 0
+
     # Get the pixels of the foreground and the background from the mask
     fg_pixels = img[mask > 0].reshape(-1, 3)
     bg_pixels = img[mask == 0].reshape(-1, 3)
@@ -164,12 +167,14 @@ def update_mask(mincut_sets, mask):
 
 
 def check_convergence(energy):
-    global prev_energy
-    print("convergence:_____________", 1e-5*(energy - prev_energy))
-    if abs(energy - prev_energy) < 1e-5*energy:
+    global prev_energy, prev_diff
+    curr_diff = abs(energy - prev_energy)
+    if curr_diff - prev_diff < 0.01:
         convergence = True
-    convergence = False
+        return convergence
+    prev_diff = curr_diff
     prev_energy = energy
+    convergence = False
     return convergence
 
 
@@ -249,17 +254,16 @@ def t_link(img, mask, bgGMM, fgGMM):
     return -np.log(t_link_source), -np.log(t_link_target)
 
 
-# TODO: verify the calculation of the t-link equations
 def t_link_calc(img_masked, bgGMM, fgGMM):
     # Calculate the numerator and denominator for the t-link equations
     diff_back = img_masked[:, np.newaxis] - bgGMM['means'][np.newaxis]
     diff_fore = img_masked[:, np.newaxis] - fgGMM['means'][np.newaxis]
 
-    covs_back_inv = np.linalg.inv(bgGMM['covs'])
-    covs_fore_inv = np.linalg.inv(fgGMM['covs'])
+    covs_back_inv = bgGMM['covs']
+    covs_fore_inv = fgGMM['covs']
 
-    left_factor_back = bgGMM['weights'] * (1 / np.sqrt(bgGMM['dets']))
-    left_factor_fore = fgGMM['weights'] * (1 / np.sqrt(fgGMM['dets']))
+    left_factor_back = bgGMM['weights'] * bgGMM['dets']
+    left_factor_fore = fgGMM['weights'] * fgGMM['dets']
 
     ut_a_u_back = np.array(list(
         (diff_back[i][j] @ covs_back_inv[j]) @ diff_back[i][j] for i in range(diff_back.shape[0]) for j in
@@ -271,8 +275,6 @@ def t_link_calc(img_masked, bgGMM, fgGMM):
     # Calculate the t-link source and target values
     t_link_source = np.sum(np.multiply(left_factor_back, np.exp(-0.5 * ut_a_u_back)), axis=1)
     t_link_target = np.sum(np.multiply(left_factor_fore, np.exp(-0.5 * ut_a_u_fore)), axis=1)
-
-    # What about the -log of the summation?
 
     return t_link_source, t_link_target
 
@@ -301,11 +303,9 @@ def gmm_fill(GMM, kmeans, pixels):
     GMM['means'] = kmeans.cluster_centers_
     GMM['covs'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
     GMM['dets'] = np.array([np.linalg.det(GMM['covs'][i]) for i in range(n_components)])
-    # for i in range(n_components):
-    #     GMM['covs'][i] = np.linalg.inv(GMM['covs'][i])
-
-    # add epsilon to avoid singular matrix
+    GMM['dets'] = 1 / np.sqrt(GMM['dets'])
     GMM['covs'] += np.eye(3) * 1e-6
+    GMM['covs'] = np.linalg.inv(GMM['covs'])
 
 
 def gmm_init():
