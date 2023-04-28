@@ -16,10 +16,10 @@ GC_PR_FGD = 3  # Soft fg pixel
 
 WEIGHT = 'weight'
 
-global g, beta, row, col, number_of_existing_edges, prev_energy, prev_diff
+global g, beta, row, col, number_of_existing_edges, prev_energy, prev_diff, K
+
 
 # k = infinity
-K = 50000
 
 
 # Define the GrabCut algorithm function
@@ -41,6 +41,7 @@ def grabcut(img, rect, n_iter=5):
     print("Initialization Time:_____", INITEND - INIT)
     num_iters = 1000
     for i in range(num_iters):
+
         print("\nIteration:_______________ ", i)
         # Update GMM
         GMMUPDATE = time.time()
@@ -59,17 +60,19 @@ def grabcut(img, rect, n_iter=5):
         print("Check Convergence Time:__", CHECKCONV - MASKUEND)
         print("energy:_________________ ", energy)
 
-
+        if i == 2:
+            break
     # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
 
 def initalize_GMMs(img, mask):
-    global g, beta, row, col, prev_energy, prev_diff
+    global g, beta, row, col, prev_energy, prev_diff, K
     # init
     row, col = img.shape[:2]
     d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
     weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
+    K = max(weights)
     init_graph(weights)
 
     prev_energy = 0
@@ -115,29 +118,31 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
 def add_t_links(t_s2, t_t2, mask):
     global g, number_of_existing_edges
 
+    g_tag = g.copy()
+
     unknown, background = map_mask_to_img(mask)
 
-    g.add_edges(zip(['s'] * len(unknown), unknown))
-    g.add_edges(zip(['t'] * len(unknown), unknown))
+    g_tag.add_edges(zip(['s'] * len(unknown), unknown))
+    g_tag.add_edges(zip(['t'] * len(unknown), unknown))
 
-    g.add_edges(zip(['s'] * len(background), background))
-    g.add_edges(zip(['t'] * len(background), background))
+    g_tag.add_edges(zip(['s'] * len(background), background))
+    g_tag.add_edges(zip(['t'] * len(background), background))
 
     s_background = K * np.ones(len(background))
     t_background = np.zeros(len(background))
 
     t = np.concatenate((t_s2, t_t2, s_background, t_background))
-    g.es[number_of_existing_edges:][WEIGHT] = t
+    g_tag.es[number_of_existing_edges:][WEIGHT] = t
+    return g_tag
 
 
 # TODO: finish this function
 def calculate_mincut(img, mask, bgGMM, fgGMM):
-    global g
     t_link_s, t_link_t = t_link(img, mask, bgGMM, fgGMM)
 
-    add_t_links(t_link_s, t_link_t, mask)
+    g_tag = add_t_links(t_link_s, t_link_t, mask)
 
-    min_cut = g.st_mincut(source='s', target='t', capacity=WEIGHT)
+    min_cut = g_tag.st_mincut(source='s', target='t', capacity=WEIGHT)
 
     energy = min_cut.value
     min_cut = min_cut.partition
@@ -270,16 +275,21 @@ def t_link_calc(img_masked, bgGMM, fgGMM):
 
     left_factor_back = bgGMM['weights'] * bgGMM['dets']
     left_factor_fore = fgGMM['weights'] * fgGMM['dets']
+    # with ThreadPoolExecutor(max_workers=5) as executor:
+    #     ut_a_u_back = executor.submit(compute_ut_a_u, diff_back, bgGMM['covs'], left_factor_back)
+    #     ut_a_u_fore = executor.submit(compute_ut_a_u, diff_fore, fgGMM['covs'], left_factor_fore)
+    #
+    # # Wait for both threads to finish
+    # ut_a_u_back = ut_a_u_back.result()
+    # ut_a_u_fore = ut_a_u_fore.result()
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        ut_a_u_back = executor.submit(compute_ut_a_u, diff_back, bgGMM['covs'], left_factor_back)
-        ut_a_u_fore = executor.submit(compute_ut_a_u, diff_fore, fgGMM['covs'], left_factor_fore)
+    ut_a_u_back2 = np.zeros((img_masked.shape[0]))
+    ut_a_u_fore2 = np.zeros((img_masked.shape[0]))
+    for i in range(5):
+        ut_a_u_back2 += compute_ut_a_u2(diff_back[:, i, :], bgGMM['covs'][i], left_factor_back[i])
+        ut_a_u_fore2 += compute_ut_a_u2(diff_fore[:, i, :], fgGMM['covs'][i], left_factor_fore[i])
 
-        # Wait for both threads to finish
-    ut_a_u_back = ut_a_u_back.result()
-    ut_a_u_fore = ut_a_u_fore.result()
-
-    return ut_a_u_back, ut_a_u_fore
+    return ut_a_u_back2, ut_a_u_fore2
 
 
 def compute_ut_a_u(diff, covs_inv, left_factor):
@@ -288,6 +298,12 @@ def compute_ut_a_u(diff, covs_inv, left_factor):
                                                                                                           5)
     t_link_ = np.sum(np.multiply(left_factor, np.exp(-0.5 * ut_a_u)), axis=1)
     return t_link_
+
+
+def compute_ut_a_u2(x, E, left_factor):
+    x_E_x = np.sum(x * np.dot(x, E), axis=1)
+    calc = left_factor * np.exp(-0.5 * x_E_x)
+    return calc
 
 
 # TODO: maybe vectorize the function
