@@ -6,6 +6,7 @@ import cv2
 import argparse
 import igraph as ig
 from sklearn.cluster import KMeans
+from scipy.stats import multivariate_normal
 
 n_components = 5
 
@@ -99,20 +100,40 @@ def initalize_GMMs(img, mask):
 
 
 # Define helper functions for the GrabCut algorithm
+# def update_GMMs(img, mask, bgGMM, fgGMM):
+#     # Get the pixels of the foreground and the background from the mask
+#     fg_pixels = img[mask > 0].reshape(-1, 3)
+#     bg_pixels = img[mask == 0].reshape(-1, 3)
+#
+#     # Use KMeans to cluster the pixels into n_components clusters for each of foreground and background
+#     fg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(fg_pixels)
+#     bg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(bg_pixels)
+#
+#     # Fill the GMM with the KMeans results
+#     gmm_fill(fgGMM, fg_kmeans, fg_pixels)
+#     gmm_fill(bgGMM, bg_kmeans, bg_pixels)
+#
+#     return bgGMM, fgGMM
+
+# Define helper functions for the GrabCut algorithm
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # Get the pixels of the foreground and the background from the mask
-    fg_pixels = img[mask > 0].reshape(-1, 3)
-    bg_pixels = img[mask == 0].reshape(-1, 3)
+        fg_pixels = img[mask > 0].reshape(-1, 3)
+        bg_pixels = img[mask == 0].reshape(-1, 3)
 
-    # Use KMeans to cluster the pixels into n_components clusters for each of foreground and background
-    fg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(fg_pixels)
-    bg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(bg_pixels)
+        fg_components = np.zeros((fg_pixels.shape[0], fg_pixels.shape[1], n_components))
+        bg_components = np.zeros((bg_pixels.shape[0], bg_pixels.shape[1], n_components))
 
-    # Fill the GMM with the KMeans results
-    gmm_fill(fgGMM, fg_kmeans, fg_pixels)
-    gmm_fill(bgGMM, bg_kmeans, bg_pixels)
+        for i in range(len(fg_components[0])):
+            fg_components[i] = multivariate_normal.pdf(fg_pixels, fgGMM["means"][i], fgGMM["covs"][i])
 
-    return bgGMM, fgGMM
+        for i in range(len(bg_components[0])):
+            bg_components[i] = multivariate_normal.pdf(bg_pixels, bgGMM["means"][i], bgGMM["covs"][i])
+
+
+        gmm_fill_new(fgGMM, fg_components)
+        gmm_fill_new(bgGMM, bg_components)
+        # x_E_x = np.sum(x * np.dot(x, E), axis=1)
 
 
 def add_t_links(t_s2, t_t2, mask):
@@ -264,6 +285,7 @@ def add_n_links_edges(weights):
 
 def t_link(img, mask, bgGMM, fgGMM):
     img_masked = img[mask > 0]
+
     t_link_source, t_link_target = t_link_calc(img_masked, bgGMM, fgGMM)
     return -np.log(t_link_source), -np.log(t_link_target)
 
@@ -329,6 +351,13 @@ def add_nodes():
 def gmm_fill(GMM, kmeans, pixels):
     GMM['means'] = kmeans.cluster_centers_
     GMM['covs'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
+    GMM['dets'] = np.array([np.linalg.det(GMM['covs'][i]) for i in range(n_components)])
+    GMM['dets'] = 1 / np.sqrt(GMM['dets'])
+    GMM['covs'] += np.eye(3) * 1e-6
+    GMM['covs'] = np.linalg.inv(GMM['covs'])
+
+def gmm_fill_new(GMM, pixels):
+    GMM['covs'] = np.array([np.cov(pixels[i].T) for i in range(n_components)])
     GMM['dets'] = np.array([np.linalg.det(GMM['covs'][i]) for i in range(n_components)])
     GMM['dets'] = 1 / np.sqrt(GMM['dets'])
     GMM['covs'] += np.eye(3) * 1e-6
