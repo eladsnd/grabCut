@@ -305,7 +305,7 @@ def sum_distance_square(rgb_vector):
 def n_link_calc(sum_dist_square):
     global beta
     return 50 * np.multiply(np.exp(-beta * sum_dist_square),
-                            np.where((sum_dist_square > 0), (1 / np.sqrt(sum_dist_square + 0.01)), 0))
+                            (1 / np.sqrt(sum_dist_square + 0.01)))
 
 
 def add_n_links_edges(weights):
