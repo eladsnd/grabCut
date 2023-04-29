@@ -18,8 +18,8 @@ GC_PR_FGD = 3  # Soft fg pixel
 WEIGHT = 'weight'
 
 global g, beta, row, col, number_of_existing_edges, prev_energy, prev_diff, K, number_of_edges_to_delete
-
-
+FG = 'fg'
+BG = 'bg'
 # k = infinity
 
 
@@ -59,7 +59,8 @@ def grabcut(img, rect, n_iter=5):
         CHECKCONV = time.time()
         print("Check Convergence Time:__", CHECKCONV - MASKUEND)
         print("energy:_________________ ", energy)
-
+        # if i == 1:
+        #     break
         # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
@@ -70,7 +71,7 @@ def initalize_GMMs(img, mask):
     row, col = img.shape[:2]
     d_adjacent, d_below, diag1_n_link, diag2_n_link = calc_beta_and_n_link(img)
     weights = np.concatenate((d_adjacent, d_below, diag1_n_link, diag2_n_link))
-    K = max(weights)
+    K = 50000
     init_graph(weights)
     number_of_edges_to_delete = 0
     prev_energy = 0
@@ -104,24 +105,11 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     fg_components = np.zeros((fg_pixels.shape[0], fgGMM['n_components']))
     bg_components = np.zeros((bg_pixels.shape[0], bgGMM['n_components']))
 
-    diff_back = bg_pixels[:, np.newaxis] - bgGMM['means'][np.newaxis]
-    diff_fore = fg_pixels[:, np.newaxis] - fgGMM['means'][np.newaxis]
-
     for i in range(fgGMM['n_components']):
         fg_components[:, i] = multivariate_normal.pdf(fg_pixels, fgGMM["means"][i], fgGMM["covs"][i],
                                                       allow_singular=True)
         bg_components[:, i] = multivariate_normal.pdf(bg_pixels, bgGMM["means"][i], bgGMM["covs"][i],
                                                       allow_singular=True)
-        # fg_left_factor = fgGMM['dets'][i]
-        # if fg_left_factor == 0:
-        #     fg_left_factor = 1
-        # fg_components[:, i] = f_x(diff_fore[:, i], fgGMM["inv_covs"][i], fg_left_factor)
-
-    # for i in range(bgGMM['n_components']):
-    #     bg_left_factor = bgGMM['dets'][i]
-    #     if bg_left_factor == 0:
-    #         bg_left_factor = 1
-    #     bg_components[:, i] = f_x(diff_back[:, i], bgGMM["inv_covs"][i], bg_left_factor)
 
     fg_new_indices = np.argmax(fg_components, axis=1)
     bg_new_indices = np.argmax(bg_components, axis=1)
@@ -138,7 +126,6 @@ def f_x(x, E, left_factor):
 
 
 def gmm_fill_new(GMM, pixels, new_indices):
-    num_components = 0
     for i in range(GMM['n_components']):
         gmm_pixels = pixels[np.where(new_indices == i)]
         if gmm_pixels.shape[0] != 0:
@@ -147,34 +134,32 @@ def gmm_fill_new(GMM, pixels, new_indices):
             GMM['dets'][i] = np.linalg.det(GMM['covs'][i])
             GMM['covs'][i] += np.eye(3) * 1e-6
             GMM['inv_covs'][i] = np.linalg.inv(GMM['covs'][i])
-            # num_components += 1
-    # GMM['n_components'] = num_components
-    # GMM['weights'] = np.ones(num_components) / num_components
-    # GMM['means'] = GMM['means'][:num_components]
-    # GMM['covs'] = GMM['covs'][:num_components]
-    # GMM['dets'] = GMM['dets'][:num_components]
-    # GMM['inv_covs'] = GMM['inv_covs'][:num_components]
+        else:
+            GMM['means'][i] = np.zeros(3)
+            GMM['covs'][i] = np.eye(3)
+            GMM['dets'][i] = 1
+            GMM['inv_covs'][i] = np.eye(3)
 
 
-def add_t_links(t_s2, t_t2, mask):
+def add_t_links(t_link_back, t_link_for, mask):
     global g, number_of_existing_edges, number_of_edges_to_delete
 
     if number_of_edges_to_delete > 0:
         edges_to_delete = g.es[-number_of_edges_to_delete:]
         g.delete_edges(edges_to_delete)
 
-    unknown, background = map_mask_to_img(mask)
+    foreground_pos, background_pos = map_mask_to_img(mask)
 
-    g.add_edges(zip(['s'] * len(unknown), unknown))
-    g.add_edges(zip(['t'] * len(unknown), unknown))
+    g.add_edges(zip([BG] * len(foreground_pos), foreground_pos))
+    g.add_edges(zip([FG] * len(foreground_pos), foreground_pos))
 
-    g.add_edges(zip(['s'] * len(background), background))
-    g.add_edges(zip(['t'] * len(background), background))
+    g.add_edges(zip([BG] * len(background_pos), background_pos))
+    g.add_edges(zip([FG] * len(background_pos), background_pos))
 
-    s_background = K * np.ones(len(background))
-    t_background = np.zeros(len(background))
+    bg_background = K * np.ones(len(background_pos))
+    fg_background = np.zeros(len(background_pos))
 
-    t = np.concatenate((t_s2, t_t2, s_background, t_background))
+    t = np.concatenate((t_link_back, t_link_for, bg_background, fg_background))
     g.es[number_of_existing_edges:][WEIGHT] = t
     number_of_edges_to_delete = len(t)
     # return g
@@ -182,11 +167,11 @@ def add_t_links(t_s2, t_t2, mask):
 
 # TODO: finish this function
 def calculate_mincut(img, mask, bgGMM, fgGMM):
-    t_link_s, t_link_t = t_link(img, mask, bgGMM, fgGMM)
+    t_link_back, t_link_for = t_link(img, mask, bgGMM, fgGMM)
 
-    add_t_links(t_link_s, t_link_t, mask)
+    add_t_links(t_link_back, t_link_for, mask)
 
-    min_cut = g.st_mincut(source='s', target='t', capacity=WEIGHT)
+    min_cut = g.st_mincut(source=BG, target=FG, capacity=WEIGHT)
 
     energy = min_cut.value
     min_cut = min_cut.partition
@@ -198,20 +183,26 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
 def map_mask_to_img(mask):
     maskk = mask.flatten()
-    front_pos = np.where(maskk > 0)[0]
+    for_pos = np.where(maskk > 0)[0]
     back_pos = np.where(maskk == 0)[0]
-    return front_pos, back_pos
+    return for_pos, back_pos
 
 
 def update_mask(mincut_sets, mask):
     global row, col
-    # get the foreground and background pixels from the mincut sets
+
+    foreground = mincut_sets[1]
+    background = mincut_sets[0]
     # remove vertex s and t from the sets
-    mincut_sets[1].remove(g.vs.find(name="t").index)
-    foreground = np.array(mincut_sets[1])
-    mask.fill(GC_BGD)
+    foreground.remove(g.vs.find(name=FG).index)
+    background.remove(g.vs.find(name=BG).index)
+
+    foreground = np.array(foreground)
+    background = np.array(background)
+
     mask = mask.flatten()
     mask[foreground] = GC_FGD
+    mask[background] = GC_BGD
     mask = mask.reshape((row, col))
     # create a mask with the same size as the image
     return mask
@@ -306,8 +297,8 @@ def add_n_links_edges(weights):
 
 def t_link(img, mask, bgGMM, fgGMM):
     img_masked = img[mask > 0]
-    t_link_source, t_link_target = t_link_calc(img_masked, bgGMM, fgGMM)
-    return -np.log(t_link_source), -np.log(t_link_target)
+    t_link_back, t_link_for = t_link_calc(img_masked, bgGMM, fgGMM)
+    return -np.log(t_link_back), -np.log(t_link_for)
 
 
 def t_link_calc(img_masked, bgGMM, fgGMM):
@@ -352,8 +343,8 @@ def add_nodes():
             vertex_id = vertex_name(i, j)
             g.add_vertex(vertex_id)
     # add source and sink
-    g.add_vertex('s')
-    g.add_vertex('t')
+    g.add_vertex(FG)
+    g.add_vertex(BG)
 
 
 def gmm_fill_init(GMM, kmeans, pixels):
