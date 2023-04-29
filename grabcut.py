@@ -42,7 +42,6 @@ def grabcut(img, rect, n_iter=5):
     print("Initialization Time:_____", INITEND - INIT)
     num_iters = 1000
     for i in range(num_iters):
-
         print("\nIteration:_______________ ", i)
         # Update GMM
         GMMUPDATE = time.time()
@@ -60,8 +59,7 @@ def grabcut(img, rect, n_iter=5):
         CHECKCONV = time.time()
         print("Check Convergence Time:__", CHECKCONV - MASKUEND)
         print("energy:_________________ ", energy)
-        if i == 7:
-            break
+
         # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
@@ -199,25 +197,23 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
 
 def map_mask_to_img(mask):
-    front = np.transpose(np.nonzero(mask))
-    back = np.transpose(np.nonzero(3 - mask) or np.nonzero(1 - mask))
-    front_pos = [vertex_name(front[i][0], front[i][1]) for i in range(front.shape[0])]
-    back_pos = [vertex_name(back[i][0], back[i][1]) for i in range(back.shape[0])]
+    maskk = mask.flatten()
+    front_pos = np.where(maskk > 0)[0]
+    back_pos = np.where(maskk == 0)[0]
     return front_pos, back_pos
 
 
 def update_mask(mincut_sets, mask):
     global row, col
     # get the foreground and background pixels from the mincut sets
-    foreground = np.array(mincut_sets[0][1:]) - 2
-
-    # create a mask with the same size as the image
-    mask = np.zeros((row, col)).flatten()
-
-    mask[foreground] = 3
-
+    # remove vertex s and t from the sets
+    mincut_sets[1].remove(g.vs.find(name="t").index)
+    foreground = np.array(mincut_sets[1])
+    mask.fill(GC_BGD)
+    mask = mask.flatten()
+    mask[foreground] = GC_FGD
     mask = mask.reshape((row, col))
-
+    # create a mask with the same size as the image
     return mask
 
 
@@ -225,7 +221,7 @@ def check_convergence(energy):
     global prev_energy, prev_diff
     curr_diff = abs(energy - prev_energy)
     print("curr_diff: ", curr_diff)
-    if curr_diff < 0.1:
+    if curr_diff < 1:
         convergence = True
         return convergence
     prev_diff = curr_diff
@@ -285,7 +281,7 @@ def sum_distance_square(rgb_vector):
 def n_link_calc(sum_dist_square):
     global beta
     return 50 * np.multiply(np.exp(-beta * sum_dist_square),
-                            np.where((sum_dist_square > 0), (1 / np.sqrt(sum_dist_square)), 0))
+                            np.where((sum_dist_square > 0), (1 / np.sqrt(sum_dist_square + 0.01)), 0))
 
 
 def add_n_links_edges(weights):
