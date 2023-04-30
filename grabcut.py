@@ -1,4 +1,3 @@
-import math
 import time
 
 import numpy as np
@@ -8,7 +7,7 @@ import igraph as ig
 from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
 
-n_components = 2
+n_components = 5
 
 GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
@@ -35,32 +34,29 @@ def grabcut(img, rect, n_iter=5):
     # init the inner square to Foreground
     mask[y:y + h, x:x + w] = GC_PR_FGD
     mask[rect[1] + rect[3] // 2, rect[0] + rect[2] // 2] = GC_FGD
-    INIT = time.time()
+
     bgGMM, fgGMM, weights = initalize_GMMs(img, mask)
-    INITEND = time.time()
-    # print("Initialization Time:_____", INITEND - INIT)
+
+    start = time.time()
+
     num_iters = 1000
     for i in range(num_iters):
+
         print("\nIteration:_______________ ", i)
-        # Update GMM
-        GMMUPDATE = time.time()
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
-        GMMUEND = time.time()
-        # print("GMM Update Time:_________", GMMUEND - GMMUPDATE)
+
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
-        MASKUPDATE = time.time()
-        # print("MinCut Time :____________", MASKUPDATE - GMMUEND)
+
         mask = update_mask(mincut_sets, mask)
-        MASKUEND = time.time()
-        # print("Mask Update Time:________", MASKUEND - MASKUPDATE)
+
         if check_convergence(energy):
             break
-        CHECKCONV = time.time()
-        # print("Check Convergence Time:__", CHECKCONV - MASKUEND)
+
         print("energy:_________________ ", energy)
         # if i == 0:
         #     break
         # Return the final mask and the GMMs
+    print("time: ", time.time() - start)
     return mask, bgGMM, fgGMM
 
 
@@ -119,7 +115,6 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     gmm_fill_update(fgGMM, fg_pixels, fg_new_indices)
     gmm_fill_update(bgGMM, bg_pixels, bg_new_indices)
 
-
     return bgGMM, fgGMM
 
 
@@ -141,7 +136,7 @@ def gmm_fill_update(GMM, pixels, new_indices):
             GMM['weights'][num_comp] = gmm_pixels.shape[0]
             while np.linalg.det(GMM['covs'][num_comp]) <= 0:
                 GMM['covs'][num_comp] += np.eye(3) * 1e-6
-            GMM['dets'][num_comp] = 1/np.linalg.det(GMM['covs'][num_comp])
+            GMM['dets'][num_comp] = 1 / np.linalg.det(GMM['covs'][num_comp])
             GMM['inv_covs'][num_comp] = np.linalg.inv(GMM['covs'][num_comp])
             sum_weights += GMM['weights'][num_comp]
             num_comp += 1
@@ -311,15 +306,15 @@ def calc_beta_and_n_link(img_):
 
 
 def sum_distance_square(rgb_vector):
-    rgb_vector_sum_square = np.array(list((np.sum(np.multiply(rgb_vector[i], rgb_vector[i]))
-                                           for i in range(rgb_vector.shape[0]))))
+    rgb_vector_sum_square = np.sum(rgb_vector ** 2, axis=1)
     return rgb_vector_sum_square
 
 
 def n_link_calc(sum_dist_square):
     global beta
-    return 50 * np.multiply(np.exp(-beta * sum_dist_square),
-                            (1 / np.sqrt(sum_dist_square + 0.01)))
+    return np.where(sum_dist_square <= 0, 0,
+                  50 * np.multiply(np.exp(-beta * sum_dist_square),
+                                   (1 / np.sqrt(sum_dist_square + 1e-10))))
 
 
 def add_n_links_edges(weights):
@@ -425,13 +420,12 @@ def name_to_vertex(name):
 
 def vertex_name(i, j):
     global col
-    # return str(i) + ',' + str(j)
     return i * col + j
 
 
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_name', type=str, default='book', help='name of image from the course files')
+    parser.add_argument('--input_name', type=str, default='teddy', help='name of image from the course files')
     parser.add_argument('--eval', type=int, default=1, help='calculate the metrics')
     parser.add_argument('--input_img_path', type=str, default='', help='if you wish to use your own img_path')
     parser.add_argument('--use_file_rect', type=int, default=1, help='Read rect from course files')
