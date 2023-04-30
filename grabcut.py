@@ -1,3 +1,4 @@
+import math
 import time
 
 import numpy as np
@@ -7,7 +8,7 @@ import igraph as ig
 from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
 
-n_components = 5
+n_components = 2
 
 GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
@@ -57,15 +58,16 @@ def grabcut(img, rect, n_iter=5):
         CHECKCONV = time.time()
         # print("Check Convergence Time:__", CHECKCONV - MASKUEND)
         print("energy:_________________ ", energy)
-        # if i == 1:
+        # if i == 0:
         #     break
         # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
 
 def initalize_GMMs(img, mask):
-    global g, beta, row, col, prev_energy, prev_diff, K, number_of_edges_to_delete
+    global g, beta, row, col, prev_energy, K, number_of_edges_to_delete
     # init global variables
+
     row, col = img.shape[:2]
     number_of_edges_to_delete = 0
     prev_energy = float('inf')
@@ -117,7 +119,6 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     gmm_fill_update(fgGMM, fg_pixels, fg_new_indices)
     gmm_fill_update(bgGMM, bg_pixels, bg_new_indices)
 
-    # print_all_gmms_data(bgGMM, fgGMM)
 
     return bgGMM, fgGMM
 
@@ -130,34 +131,35 @@ def f_x(x, E, left_factor):
 
 def gmm_fill_update(GMM, pixels, new_indices):
     sum_weights = 0
-    num_components = 0
+    num_comp = 0
     for i in range(GMM['n_components']):
         gmm_pixels = pixels[np.where(new_indices == i)]
         if gmm_pixels.shape[0] > 1:
-            GMM['means'][num_components] = np.mean(gmm_pixels, axis=0)
-            GMM['covs'][num_components] = np.cov(gmm_pixels.T)
-            GMM['covs'][num_components] += np.eye(3) * 1e-6
-            GMM['weights'][num_components] = gmm_pixels.shape[0]
-            while np.linalg.det(GMM['covs'][num_components]) <= 0:
-                GMM['covs'][num_components] += np.eye(3) * 1e-6
-            GMM['dets'][num_components] = np.linalg.det(GMM['covs'][num_components])
-            GMM['inv_covs'][num_components] = np.linalg.inv(GMM['covs'][num_components])
-            sum_weights += GMM['weights'][num_components]
-            num_components += 1
-        # else:
-        #     GMM['means'][i] = np.zeros(3)
-        #     GMM['covs'][i] = np.eye(3)
-        #     GMM['dets'][i] = 1
-        #     GMM['inv_covs'][i] = np.eye(3)
-    GMM['weights'] = GMM['weights'] / sum_weights
-    GMM['n_components'] = num_components
+            GMM['means'][num_comp] = np.mean(gmm_pixels, axis=0)
+            GMM['covs'][num_comp] = np.cov(gmm_pixels.T)
+            GMM['covs'][num_comp] += np.eye(3) * 1e-6
+            GMM['weights'][num_comp] = gmm_pixels.shape[0]
+            while np.linalg.det(GMM['covs'][num_comp]) <= 0:
+                GMM['covs'][num_comp] += np.eye(3) * 1e-6
+            GMM['dets'][num_comp] = 1/np.linalg.det(GMM['covs'][num_comp])
+            GMM['inv_covs'][num_comp] = np.linalg.inv(GMM['covs'][num_comp])
+            sum_weights += GMM['weights'][num_comp]
+            num_comp += 1
+        else:
+            GMM['weights'][i] = 0
+            GMM['means'][i] = np.zeros(3)
+            GMM['covs'][i] = np.eye(3)
+            GMM['dets'][i] = 1
+            GMM['inv_covs'][i] = np.eye(3)
 
+    GMM['weights'] = GMM['weights'] / sum_weights
+    GMM['n_components'] = num_comp
     # reshape_GMM(GMM)
-    GMM['means'] = GMM['means'][:num_components]
-    GMM['covs'] = GMM['covs'][:num_components]
-    GMM['dets'] = GMM['dets'][:num_components]
-    GMM['inv_covs'] = GMM['inv_covs'][:num_components]
-    GMM['weights'] = GMM['weights'][:num_components]
+    GMM['means'] = GMM['means'][:num_comp]
+    GMM['covs'] = GMM['covs'][:num_comp]
+    GMM['dets'] = GMM['dets'][:num_comp]
+    GMM['inv_covs'] = GMM['inv_covs'][:num_comp]
+    GMM['weights'] = GMM['weights'][:num_comp]
 
 
 def print_all_gmms_data(bgGMM, fgGMM):
@@ -181,18 +183,26 @@ def add_t_links(bg_t_link, fg_t_link, mask):
         edges_to_delete = g.es[-number_of_edges_to_delete:]
         g.delete_edges(edges_to_delete)
 
-    fg_pixels_pos, bg_pixels_pos = map_mask_to_img(mask)
-
+    strong_fg_pixels_pos, fg_pixels_pos, bg_pixels_pos = map_mask_to_img(mask)
+    # D(front) [for background] , D(back) [for foreground]
     g.add_edges(zip([BG] * len(fg_pixels_pos), fg_pixels_pos))
     g.add_edges(zip([FG] * len(fg_pixels_pos), fg_pixels_pos))
 
+    # Strong background t-links
     g.add_edges(zip([BG] * len(bg_pixels_pos), bg_pixels_pos))
     g.add_edges(zip([FG] * len(bg_pixels_pos), bg_pixels_pos))
 
-    bg_background = K * np.ones(len(bg_pixels_pos))
-    fg_background = np.zeros(len(bg_pixels_pos))
+    # Strong foreground t-links
+    g.add_edges(zip([BG] * len(strong_fg_pixels_pos), strong_fg_pixels_pos))
+    g.add_edges(zip([FG] * len(strong_fg_pixels_pos), strong_fg_pixels_pos))
 
-    t = np.concatenate((bg_t_link, fg_t_link, bg_background, fg_background))
+    bg_to_BG = K * np.ones(len(bg_pixels_pos))
+    bg_to_FG = np.zeros(len(bg_pixels_pos))
+
+    sfg_to_BG = np.zeros(len(strong_fg_pixels_pos))
+    sfg_to_FG = K * np.ones(len(strong_fg_pixels_pos))
+
+    t = np.concatenate((bg_t_link, fg_t_link, bg_to_BG, bg_to_FG, sfg_to_BG, sfg_to_FG))
 
     g.es[number_of_existing_edges:][WEIGHT] = t
     number_of_edges_to_delete = len(t)
@@ -214,9 +224,10 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
 
 def map_mask_to_img(mask):
     flat_mask = mask.flatten()
-    for_pos = np.where(flat_mask > 0)[0]
-    back_pos = np.where(flat_mask == 0)[0]
-    return for_pos, back_pos
+    fg_pos = np.where(flat_mask == GC_PR_FGD)[0]
+    back_pos = np.where(flat_mask == GC_BGD)[0]
+    sfg_pos = np.where(flat_mask == GC_FGD)[0]
+    return sfg_pos, fg_pos, back_pos
 
 
 def update_mask(mincut_sets, mask):
@@ -234,8 +245,11 @@ def update_mask(mincut_sets, mask):
 
     mask = mask.flatten()
 
-    mask[foreground] = GC_FGD
+    strong_foreground = np.where(mask == GC_FGD)[0]
+
+    mask[foreground] = GC_PR_FGD
     mask[background] = GC_BGD
+    mask[strong_foreground] = GC_FGD
 
     mask = mask.reshape((row, col))
     # create a mask with the same size as the image
@@ -246,7 +260,7 @@ def check_convergence(energy):
     global prev_energy
     diff = abs(energy - prev_energy)
     print("curr_diff: ", diff)
-    if diff < 100:
+    if diff < 1000:
         convergence = True
         return convergence
     prev_energy = energy
@@ -329,7 +343,7 @@ def add_n_links_edges(weights):
 
 
 def t_link(img, mask, bgGMM, fgGMM):
-    fore_mask = img[mask > 0]
+    fore_mask = img[mask == 3]
     bg_t_link, fg_t_link = t_link_calc(fore_mask, bgGMM, fgGMM)
     return -np.log(bg_t_link), -np.log(fg_t_link)
 
@@ -387,7 +401,7 @@ def gmm_fill_init(GMM, kmeans, pixels):
     GMM['means'] = kmeans.cluster_centers_
     GMM['covs'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
     GMM['dets'] = np.array([np.linalg.det(GMM['covs'][i]) for i in range(n_components)])
-    GMM['dets'] = 1 / np.sqrt(GMM['dets'])
+    GMM['dets'] = GMM['dets']
     GMM['covs'] += np.eye(3) * 1e-6
     GMM['inv_covs'] = np.linalg.inv(GMM['covs'])
 
@@ -417,7 +431,7 @@ def vertex_name(i, j):
 
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_name', type=str, default='cross', help='name of image from the course files')
+    parser.add_argument('--input_name', type=str, default='book', help='name of image from the course files')
     parser.add_argument('--eval', type=int, default=1, help='calculate the metrics')
     parser.add_argument('--input_img_path', type=str, default='', help='if you wish to use your own img_path')
     parser.add_argument('--use_file_rect', type=int, default=1, help='Read rect from course files')
