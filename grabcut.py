@@ -1,3 +1,4 @@
+import os
 import time
 
 import numpy as np
@@ -7,7 +8,7 @@ import igraph as ig
 from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
 
-n_components = 5
+n_components = 2
 
 GC_BGD = 0  # Hard bg pixel
 GC_FGD = 1  # Hard fg pixel, will not be used
@@ -16,7 +17,7 @@ GC_PR_FGD = 3  # Soft fg pixel
 
 WEIGHT = 'weight'
 
-global g, beta, row, col, number_of_existing_edges, prev_energy, K, number_of_edges_to_delete
+global g, beta, row, col, number_of_existing_edges, prev_energy, K, number_of_edges_to_delete, number
 FG = 'fg'
 BG = 'bg'
 
@@ -25,6 +26,7 @@ BG = 'bg'
 def grabcut(img, rect, n_iter=5):
     global prev_energy
     # Assign initial labels to the pixels based on the bounding box
+
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
     x, y, w, h = rect
@@ -41,8 +43,7 @@ def grabcut(img, rect, n_iter=5):
 
     num_iters = 1000
     for i in range(num_iters):
-
-        print("\nIteration:_______________ ", i)
+        # print("\nIteration:_______________ ", i)
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
 
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
@@ -52,16 +53,18 @@ def grabcut(img, rect, n_iter=5):
         if check_convergence(energy):
             break
 
-        print("energy:_________________ ", energy)
+        # print("energy:_________________ ", energy)
         # if i == 0:
         #     break
         # Return the final mask and the GMMs
-    print("time: ", time.time() - start)
+    # print("time: ", time.time() - start)
+    # print number of pixels in mask
+    # print("number of pixels in mask: ", np.count_nonzero(mask))
     return mask, bgGMM, fgGMM
 
 
 def initalize_GMMs(img, mask):
-    global g, beta, row, col, prev_energy, K, number_of_edges_to_delete
+    global g, beta, row, col, prev_energy, K, number_of_edges_to_delete, number
     # init global variables
 
     row, col = img.shape[:2]
@@ -84,8 +87,8 @@ def initalize_GMMs(img, mask):
     bgGMM = gmm_init()
 
     # Use KMeans to cluster the pixels into n_components clusters for each of foreground and background
-    bg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(bg_pixels)
-    fg_kmeans = KMeans(n_clusters=n_components, random_state=0, n_init=10).fit(fg_pixels)
+    bg_kmeans = KMeans(n_clusters=number, random_state=0, n_init=10).fit(bg_pixels)
+    fg_kmeans = KMeans(n_clusters=number, random_state=0, n_init=10).fit(fg_pixels)
 
     # Fill the GMM with the KMeans results
     gmm_fill_init(fgGMM, fg_kmeans, fg_pixels)
@@ -140,12 +143,13 @@ def gmm_fill_update(GMM, pixels, new_indices):
             GMM['inv_covs'][num_comp] = np.linalg.inv(GMM['covs'][num_comp])
             sum_weights += GMM['weights'][num_comp]
             num_comp += 1
-        else:
-            GMM['weights'][i] = 0
-            GMM['means'][i] = np.zeros(3)
-            GMM['covs'][i] = np.eye(3)
-            GMM['dets'][i] = 1
-            GMM['inv_covs'][i] = np.eye(3)
+        # else:
+        # GMM['weights'][i] = 0
+        # GMM['means'][i] = np.zeros(3)
+        # GMM['covs'][i] = np.eye(3)
+        # GMM['dets'][i] = 1
+        # GMM['inv_covs'][i] = np.eye(3)
+        # num_comp += 1
 
     GMM['weights'] = GMM['weights'] / sum_weights
     GMM['n_components'] = num_comp
@@ -157,23 +161,8 @@ def gmm_fill_update(GMM, pixels, new_indices):
     GMM['weights'] = GMM['weights'][:num_comp]
 
 
-def print_all_gmms_data(bgGMM, fgGMM):
-    print("~~BG GMM~~")
-    print_all_gmm_data(bgGMM)
-    print("~~FG GMM~~")
-    print_all_gmm_data(fgGMM)
-
-
-def print_all_gmm_data(gmm):
-    for i in range(n_components):
-        print(f"comp {i}")
-        print(f"mean: {gmm['means'][i]}")
-        print(f"cov: {gmm['dets'][i]}")
-        print(f"weight: {gmm['weights'][i]}")
-
-
 def add_t_links(bg_t_link, fg_t_link, mask):
-    global g, number_of_existing_edges, number_of_edges_to_delete, K
+    global g, number_of_existing_edges, number_of_edges_to_delete, K, number
     if number_of_edges_to_delete > 0:
         edges_to_delete = g.es[-number_of_edges_to_delete:]
         g.delete_edges(edges_to_delete)
@@ -254,7 +243,7 @@ def update_mask(mincut_sets, mask):
 def check_convergence(energy):
     global prev_energy
     diff = abs(energy - prev_energy)
-    print("curr_diff: ", diff)
+    # print("curr_diff: ", diff)
     if diff < 1000:
         convergence = True
         return convergence
@@ -297,10 +286,10 @@ def calc_beta_and_n_link(img_):
     beta = 1 / (2 * (sum_m / neighbor_count))
 
     # Calculate the n-link weights
-    dx_n_link = n_link_calc(dx_sum_dist_square)
-    dy_n_link = n_link_calc(dy_sum_dist_square)
-    diag1_n_link = n_link_calc(diag1_sum_dist_square)
-    diag2_n_link = n_link_calc(diag2_sum_dist_square)
+    dx_n_link = n_link_calc(dx_sum_dist_square, 1)
+    dy_n_link = n_link_calc(dy_sum_dist_square, 1)
+    diag1_n_link = n_link_calc(diag1_sum_dist_square, 2)
+    diag2_n_link = n_link_calc(diag2_sum_dist_square, 2)
 
     return dx_n_link, dy_n_link, diag1_n_link, diag2_n_link
 
@@ -310,11 +299,9 @@ def sum_distance_square(rgb_vector):
     return rgb_vector_sum_square
 
 
-def n_link_calc(sum_dist_square):
+def n_link_calc(sum_dist_square, dist):
     global beta
-    return np.where(sum_dist_square <= 0, 0,
-                  50 * np.multiply(np.exp(-beta * sum_dist_square),
-                                   (1 / np.sqrt(sum_dist_square + 1e-10))))
+    return 50 * np.exp(-beta * sum_dist_square) / np.sqrt(dist)
 
 
 def add_n_links_edges(weights):
@@ -362,6 +349,10 @@ def t_link_calc(fg_mask, bgGMM, fgGMM):
     for i in range(fgGMM['n_components']):
         fg_xEx += compute_ut_a_u2(fg_x[:, i, :], fg_E[i], fg_left_fac[i])
 
+    # if bg_xEx == 0: -log(bg_xEx) = 0 , if fg_xEx == 0: -log(fg_xEx) = 0
+    bg_xEx[bg_xEx == 0] = 1e-10
+    fg_xEx[fg_xEx == 0] = 1e-10
+
     return bg_xEx, fg_xEx
 
 
@@ -371,7 +362,6 @@ def compute_ut_a_u2(x, E, left_factor):
     return calc
 
 
-# TODO: maybe vectorize the function
 def init_graph(weights):
     global g
     g = ig.Graph()
@@ -392,23 +382,25 @@ def add_nodes():
 
 
 def gmm_fill_init(GMM, kmeans, pixels):
-    GMM['n_components'] = n_components
+    global number
+    GMM['n_components'] = number
     GMM['means'] = kmeans.cluster_centers_
-    GMM['covs'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(n_components)])
-    GMM['dets'] = np.array([np.linalg.det(GMM['covs'][i]) for i in range(n_components)])
+    GMM['covs'] = np.array([np.cov(pixels[kmeans.labels_ == i].T) for i in range(number)])
+    GMM['dets'] = np.array([np.linalg.det(GMM['covs'][i]) for i in range(number)])
     GMM['dets'] = GMM['dets']
     GMM['covs'] += np.eye(3) * 1e-6
     GMM['inv_covs'] = np.linalg.inv(GMM['covs'])
 
 
 def gmm_init():
+    global number
     GMM = {
-        'n_components': n_components,
-        'weights': np.full(n_components, 1 / n_components),
-        'means': np.zeros((n_components, 3)),
-        'covs': np.zeros((n_components, 3, 3)),
-        'dets': np.zeros(n_components),
-        'inv_covs': np.zeros((n_components, 3, 3))}
+        'n_components': number,
+        'weights': np.full(number, 1 / number),
+        'means': np.zeros((number, 3)),
+        'covs': np.zeros((number, 3, 3)),
+        'dets': np.zeros(number),
+        'inv_covs': np.zeros((number, 3, 3))}
     return GMM
 
 
@@ -423,9 +415,267 @@ def vertex_name(i, j):
     return i * col + j
 
 
+def all_images():
+    global number
+    args = parse()
+    images = {'banana1': 1, 'banana2': 5, 'book': 2, 'bush': 2,
+              'cross': 1, 'flower': 3, 'grave': 5, 'llama': 5,
+              'memorial': 5, 'sheep': 5}
+    all_time = 0
+    number_of_images = images.__len__()
+    for img_name, num_components in images.items():
+        args.input_name = img_name
+        number = 5
+        if args.input_img_path == '':
+            input_path = f'data/imgs/{args.input_name}.jpg'
+        else:
+            input_path = args.input_img_path
+
+        if args.use_file_rect:
+            rect = tuple(map(int, open(f"data/bboxes/{args.input_name}.txt", "r").read().split(' ')))
+        else:
+            rect = tuple(map(int, args.rect.split(',')))
+
+        img = cv2.imread(input_path)
+        print(f'Running GrabCut on {args.input_name} with {number} components')
+        # Run the GrabCut algorithm on the image and bounding box
+        time_start = time.time()
+        mask, bgGMM, fgGMM = grabcut(img, rect)
+        time_end = time.time()
+        mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY)[1]
+
+        # Print metrics only if requested (valid only for course files)
+        if args.eval:
+            gt_mask = cv2.imread(f'data/seg_GT/{args.input_name}.bmp', cv2.IMREAD_GRAYSCALE)
+            gt_mask = cv2.threshold(gt_mask, 0, 1, cv2.THRESH_BINARY)[1]
+            acc, jac = cal_metric(mask, gt_mask)
+            # print(f'Accuracy={acc}, Jaccard={jac}')
+            # append 'image_name, accuracy, jaccard' to a file
+            with open('metrics.csv', 'a') as f:
+                f.write(f'{args.input_name},{acc},{jac},{time_end - time_start}\n')
+            print(f' image: {args.input_name}\taccuracy: {acc}, jaccard: {jac} time: {time_end - time_start} \n')
+        all_time += time_end - time_start
+    with open('metrics.csv', 'a') as f:
+        f.write(f'average time: {all_time / number_of_images}\n')
+
+
+def blur():
+    global number
+    # analyze the effect of blur (low, high and without) on the results
+    args = parse()
+    images = {'banana1': 5, 'cross': 5, 'bush': 5}
+    print(f'blur image metrics!')
+
+    for img_name, num_components in images.items():
+        args.input_name = img_name
+        number = num_components
+        if args.input_img_path == '':
+            input_path = f'data/imgs/{args.input_name}.jpg'
+        else:
+            input_path = args.input_img_path
+
+        if args.use_file_rect:
+            rect = tuple(map(int, open(f"data/bboxes/{args.input_name}.txt", "r").read().split(' ')))
+        else:
+            rect = tuple(map(int, args.rect.split(',')))
+
+        img = cv2.imread(input_path)
+        # low blur
+        img_blur = cv2.GaussianBlur(img, (5, 5), 0)
+        # high blur
+        img_blur2 = cv2.GaussianBlur(img, (15, 15), 0)
+        # Run the GrabCut algorithm on the image and bounding box
+        time_start = time.time()
+        print(f'Running GrabCut on {args.input_name} with {number} components on low blur')
+        mask, bgGMM, fgGMM = grabcut(img_blur, rect)
+        time_end = time.time()
+        mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY)[1]
+
+        # Print metrics only if requested (valid only for course files)
+        if args.eval:
+            gt_mask = cv2.imread(f'data/seg_GT/{args.input_name}.bmp', cv2.IMREAD_GRAYSCALE)
+            gt_mask = cv2.threshold(gt_mask, 0, 1, cv2.THRESH_BINARY)[1]
+            acc, jac = cal_metric(mask, gt_mask)
+            # print(f'Accuracy={acc}, Jaccard={jac}')
+            # append 'image_name, accuracy, jaccard' to a file
+            with open('metrics.csv', 'a') as f:
+                f.write(f'{args.input_name} low blur,{acc},{jac},{time_end - time_start}\n')
+            print(
+                f' image: {args.input_name}\nlow blur : \n\taccuracy: {acc}, jaccard: {jac} time: {time_end - time_start} \n')
+
+        # Run the GrabCut algorithm on the image and bounding box with high blur
+        time_start = time.time()
+        print(f'Running GrabCut on {args.input_name} with {number} components with no blur')
+        mask, bgGMM, fgGMM = grabcut(img, rect)
+        time_end = time.time()
+        mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY)[1]
+        if args.eval:
+            gt_mask = cv2.imread(f'data/seg_GT/{args.input_name}.bmp', cv2.IMREAD_GRAYSCALE)
+            gt_mask = cv2.threshold(gt_mask, 0, 1, cv2.THRESH_BINARY)[1]
+            acc, jac = cal_metric(mask, gt_mask)
+            # print(f'Accuracy={acc}, Jaccard={jac}')
+            # append 'image_name, accuracy, jaccard' to a file
+            with open('metrics.csv', 'a') as f:
+                f.write(f'{args.input_name} no blur,{acc},{jac},{time_end - time_start}\n')
+            print(
+                f' image: {args.input_name}\nno blur : \n\taccuracy: {acc}, jaccard: {jac} time: {time_end - time_start} \n')
+
+        # Run the GrabCut algorithm on the image and bounding box with high blur
+        time_start = time.time()
+        print(f'Running GrabCut on {args.input_name} with {number} components on high blur')
+        mask, bgGMM, fgGMM = grabcut(img_blur2, rect)
+        time_end = time.time()
+        mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY)[1]
+
+        # Print metrics only if requested (valid only for course files)
+        if args.eval:
+            gt_mask = cv2.imread(f'data/seg_GT/{args.input_name}.bmp', cv2.IMREAD_GRAYSCALE)
+            gt_mask = cv2.threshold(gt_mask, 0, 1, cv2.THRESH_BINARY)[1]
+            acc, jac = cal_metric(mask, gt_mask)
+            # print(f'Accuracy={acc}, Jaccard={jac}')
+            # append 'image_name, accuracy, jaccard' to a file
+            with open('metrics.csv', 'a') as f:
+                f.write(f'{args.input_name} high blur,{acc},{jac},{time_end - time_start}\n')
+            print(f'high blur : \t accuracy: {acc}, jaccard: {jac} time: {time_end - time_start} \n')
+
+
+def different_component_number():
+    global number
+    # analyze the effect of blur (low, high and without) on the results
+    args = parse()
+    images = {'banana1': 5, 'cross': 5, 'bush': 5}
+    # get key from dict
+    print('differant component number metrics!')
+    for img_name, num_components in images.items():
+        for num in range(1, 6):
+            args.input_name = img_name
+            number = num
+            if args.input_img_path == '':
+                input_path = f'data/imgs/{args.input_name}.jpg'
+            else:
+                input_path = args.input_img_path
+
+            if args.use_file_rect:
+                rect = tuple(map(int, open(f"data/bboxes/{args.input_name}.txt", "r").read().split(' ')))
+            else:
+                rect = tuple(map(int, args.rect.split(',')))
+
+            img = cv2.imread(input_path)
+            # Run the GrabCut algorithm on the image and bounding box
+            time_start = time.time()
+            print(f'Running GrabCut on {args.input_name} with {number} components')
+            mask, bgGMM, fgGMM = grabcut(img, rect)
+            time_end = time.time()
+            mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY)[1]
+
+            # Print metrics only if requested (valid only for course files)
+            if args.eval:
+                gt_mask = cv2.imread(f'data/seg_GT/{args.input_name}.bmp', cv2.IMREAD_GRAYSCALE)
+                gt_mask = cv2.threshold(gt_mask, 0, 1, cv2.THRESH_BINARY)[1]
+                acc, jac = cal_metric(mask, gt_mask)
+                # print(f'Accuracy={acc}, Jaccard={jac}')
+                # append 'image_name, accuracy, jaccard' to a file
+                with open('metrics.csv', 'a') as f:
+                    f.write(f'{args.input_name},{acc},{jac},{number},{time_end - time_start}\n')
+                print(
+                    f' image: {args.input_name}\taccuracy: {acc}, jaccard: {jac},number of components : {number} time: {time_end - time_start} \n')
+
+
+def different_initialization():
+    global number
+    # analyze the effect of blur (low, high and without) on the results
+    args = parse()
+    images = {'banana1': 5, 'cross': 5, 'bush': 5}
+
+    # get key from dict
+    print('differant initialization metrics!')
+    for img_name, num_components in images.items():
+        args.input_name = img_name
+        number = num_components
+        if args.input_img_path == '':
+            input_path = f'data/imgs/{args.input_name}.jpg'
+        else:
+            input_path = args.input_img_path
+
+        if args.use_file_rect:
+            rect_original = tuple(map(int, open(f"data/bboxes/{args.input_name}.txt", "r").read().split(' ')))
+        else:
+            rect_original = tuple(map(int, args.rect.split(',')))
+        img = cv2.imread(input_path)
+        # rect_wide = wider rect
+        rect_wide = (rect_original[0] - 10, rect_original[1] - 10, rect_original[2] + 10, rect_original[3] + 10)
+        # rect_narrow = narrower rect
+        rect_narrow = (rect_original[0] + 10, rect_original[1] + 10, rect_original[2] - 10, rect_original[3] - 10)
+        # rect_shift = shifted rect left and up
+        rect_shift_left_and_right = (
+            rect_original[0] + 10, rect_original[1] + 10, rect_original[2] + 10, rect_original[3] + 10)
+        # rect_shift2 = shifted rect right and down
+        rect_shift_right_and_down = (
+            rect_original[0] - 10, rect_original[1] - 10, rect_original[2] - 10, rect_original[3] - 10)
+        # rect array
+        rect_array = [rect_original, rect_wide, rect_narrow, rect_shift_left_and_right, rect_shift_right_and_down]
+        for i, rectangle in enumerate(rect_array):
+            if i == 0:
+                rect_name = "original rectangle"
+            elif i == 1:
+                rect_name = "wide rectangle"
+            elif i == 2:
+                rect_name = "narrow rectangle"
+            elif i == 3:
+                rect_name = "rectangle shift left and up"
+            elif i == 4:
+                rect_name = "rectangle shift right and down"
+            time_start = time.time()
+            print(f'Running GrabCut on {args.input_name} with {number} components')
+            mask, bgGMM, fgGMM = grabcut(img, rectangle)
+            time_end = time.time()
+            mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY)[1]
+
+            # Print metrics only if requested (valid only for course files)
+            if args.eval:
+                gt_mask = cv2.imread(f'data/seg_GT/{args.input_name}.bmp', cv2.IMREAD_GRAYSCALE)
+                gt_mask = cv2.threshold(gt_mask, 0, 1, cv2.THRESH_BINARY)[1]
+                acc, jac = cal_metric(mask, gt_mask)
+                # print(f'Accuracy={acc}, Jaccard={jac}')
+                # append 'image_name, accuracy, jaccard' to a file
+                with open('metrics.csv', 'a') as f:
+                    f.write(f'{rect_name}:\n{args.input_name},{acc},{jac},{number},{time_end - time_start}\n')
+                print(
+                    f' image: {args.input_name}\taccuracy: {acc}, jaccard: {jac},number of components : {number} time: {time_end - time_start} \n')
+
+
+def output_pdf_metricis():
+    with open('metrics.csv', 'a') as f:
+        f.write('all images 5 components\n')
+        f.write('image_name,accuracy,jaccard,time\n')
+    all_images()
+    with open('metrics.csv', 'a') as f:
+        f.write(f'_______________________________\n')
+        f.write('blur effects on the images 5 components\n')
+        f.write('image_name,accuracy,jaccard,time\n')
+    blur()
+    with open('metrics.csv', 'a') as f:
+        f.write(f'_______________________________\n')
+        f.write('different component number\n')
+        f.write('image_name,accuracy,jaccard,number of components,time\n')
+    different_component_number()
+    with open('metrics.csv', 'a') as f:
+        f.write(f'_______________________________\n')
+        f.write('different initialization\n')
+        f.write('image_name,accuracy,jaccard,number of components,time\n')
+    different_initialization()
+
+
+def save_mask(mask):
+    # create a folder if not exist
+    if not os.path.exists('data/masks'):
+        os.makedirs('data/masks')
+    cv2.imwrite(f'data/masks/{args.input_name}.bmp', mask * 255)
+
+
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_name', type=str, default='teddy', help='name of image from the course files')
+    parser.add_argument('--input_name', type=str, default='fullmoon', help='name of image from the course files')
     parser.add_argument('--eval', type=int, default=1, help='calculate the metrics')
     parser.add_argument('--input_img_path', type=str, default='', help='if you wish to use your own img_path')
     parser.add_argument('--use_file_rect', type=int, default=1, help='Read rect from course files')
@@ -434,9 +684,10 @@ def parse():
 
 
 if __name__ == '__main__':
+    global number
     # Load an example image and define a bounding box around the object of interest
     args = parse()
-
+    number = 1
     if args.input_img_path == '':
         input_path = f'data/imgs/{args.input_name}.jpg'
     else:
@@ -459,7 +710,7 @@ if __name__ == '__main__':
         gt_mask = cv2.threshold(gt_mask, 0, 1, cv2.THRESH_BINARY)[1]
         acc, jac = cal_metric(mask, gt_mask)
         print(f'Accuracy={acc}, Jaccard={jac}')
-
+    # save_mask(mask)
     # Apply the final mask to the input image and display the results
     img_cut = img * (mask[:, :, np.newaxis])
     cv2.imshow('Original Image', img)
