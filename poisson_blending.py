@@ -20,14 +20,14 @@ def laplacian_matrix(n, m):
     return mat_A
 
 
-def reshape_image(img_src, img_mask, center):
+def reshape_image(img_src, img_mask, center, x_odd, y_odd):
     padding_x = abs(int(center[1] - (img_src.shape[0] / 2)))
     padding_y = abs(int(center[0] - (img_src.shape[1] / 2)))
 
-    pad_src = np.pad(img_src, ((padding_x, padding_x), (padding_y, padding_y), (0, 0)),
+    pad_src = np.pad(img_src, ((padding_x + x_odd, padding_x), (padding_y + y_odd, padding_y), (0, 0)),
                      mode='constant', constant_values=0)
 
-    pad_mask = np.pad(img_mask, ((padding_x, padding_x), (padding_y, padding_y)),
+    pad_mask = np.pad(img_mask, ((padding_x + x_odd, padding_x), (padding_y + y_odd, padding_y)),
                       mode='constant', constant_values=0)
 
     return pad_src, pad_mask
@@ -42,7 +42,12 @@ def get_range(img_target):
 
 
 def poisson_blend(im_src, im_tgt, im_mask, center):
-    pad_src, pad_mask = reshape_image(im_src, im_mask, center)
+    # x_odd = 0 if img_tgt.shape[0] % 2 == 0 else 1
+    # y_odd = 0 if img_tgt.shape[1] % 2` `== 0 else 1
+    x_odd = im_tgt.shape[0] % 2
+    y_odd = im_tgt.shape[1] % 2
+
+    pad_src, pad_mask = reshape_image(im_src, im_mask, center, x_odd, y_odd)
 
     A = laplacian_matrix(pad_mask.shape[0], pad_mask.shape[1])
     lap = A.tocsc()
@@ -94,7 +99,7 @@ def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--src_path', type=str, default='./data/imgs/banana2.jpg', help='image file path')
     parser.add_argument('--mask_path', type=str, default='./data/seg_GT/banana2.bmp', help='mask file path')
-    parser.add_argument('--tgt_path', type=str, default='./data/bg/table.jpg', help='mask file path')
+    parser.add_argument('--tgt_path', type=str, default='./data/bg/wall.jpg', help='mask file path')
     return parser.parse_args()
 
 
